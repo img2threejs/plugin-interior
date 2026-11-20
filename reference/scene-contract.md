@@ -17,6 +17,9 @@ The agent creates `scene-spec.json` and real `build_scene.py` after viewing the 
 | `authoring.inspectionViews` | Object of named native Z-up `position,target` poses; `source` is implicit. Choose meaningful lateral/reverse/material/cloth views for this scene. |
 | `authoring.probePosition` | Authored indoor Z-up point, chosen away from geometry; production probe is 2:1 equirectangular. |
 | `authoring.resourceManifest` | Optional workspace-relative actual acquisition receipt; omit for genuinely procedural scenes. |
+| `excludeComponents` | Optional exact component identities, matching the pinned intake; never labels guessed by the builder. |
+| `routing.objectId` | Set only for a base-owned routed child. Enables the measured D18 artifact producer at export. |
+| `authoring.roomMeasurementComponents` | Required for routed export: nonempty exact component identities of the actual room shell; its exported world-vertex envelope supplies width/height/depth, not image-recovered dimensions. |
 | `runtime` | `background:null` or local HDR/EXR URL, `backgroundIntensity`, optional `glassTransmission`, `variants:[]` or named finishes and optional `finishTarget`. |
 | `assumptions` | Specific authored geometry/scale/material/lighting limits; do not claim measurements from one image. |
 
@@ -29,6 +32,17 @@ A nonempty variant list uses `{id,label,color:"#rrggbb",roughness?}`. The first 
 `context.workspace`, `.assets`, `.evidence` are `Path` objects for this project/current run. `.spec` is the parsed dictionary; `.resolve(relative)` confines data inputs/outputs to the workspace. `.helpers` lazily creates a workspace-private helper namespace; no installed-source paths or import-time scene generation.
 
 A complete builder creates actual physical objects, material graphs, a source camera, world/lights and JSON-serializable summary with at least `roomBounds:{min,max}` in native Z-up, camera/views/components/assumptions. Use the complete linked builders as API examples, not an empty factory or a canned scene. Use a real source camera with horizontal sensor fit; ensure actual world pose and target match the declaration. No zero-vector camera templates.
+
+## Per-object ownership and composition handoff
+
+The parent maps separately routed objects to the same exact component identities used by the intake and builder, and passes them as `excludeComponents`. Intake exclusions must be unique declared `components`. Builders can inspect `context.exclude_components` to skip them; independently, `draft` removes every matching scene object (including hidden objects) after the builder returns and before modifier processing, native saving, rendering or baking. The master pins the intake hash and exclusion set. Later native stages refuse changes until a new draft/rebake; changing ownership for an accepted routed artifact requires a new child revision/workspace. No matching is inferred from object names or prose.
+
+For a routed child, run the ordinary draft → bake → probe → export chain with `routing.objectId` and `authoring.roomMeasurementComponents` set in the spec. Export reimports the actual runtime GLB into a disposable Blender scene and measures world vertices. It writes `room-composition.glb` and `scene-measurements.json` in that export run's evidence directory, then root `artifact.json` with real workspace-relative file hashes, frame `m/+Y/+Z`, bottom-centre pivot, scalar `scaleEstimate:1.0`, `rig:null`, and positive `roomDimensions:{width,height,depth}` metres.
+
+The composition GLB preserves original mesh, material and embedded image bytes, adding a scene parent translation and updating cloth origin extras. It is reimported to verify the bottom-centre pivot and unchanged shell measurements. Existing runtime GLB/manifest, viewer, portable GLB and native master stay unchanged. This is a static composition handoff, not a claim that the current viewer accepts transformed cloth roots. Missing/invalid shell geometry, excluded meshes, external GLB resources, rigs or unverifiable measurements block artifact publication. Room dimensions describe the selected authored shell envelope, not recovered real-world room dimensions. All existing delivery/material/workflow gates and independent visual/runtime review remain mandatory.
+
+This adapter is pinned to 0.3.1 (scene-spec 1 / runtime manifest 2), one enclosed room only. The original 0.4 WIP adds house/room identity, schema-3 transport/encoding and viewer/runtime audits; none is implicitly migrated or qualified here.
+
 
 ## Reusable helper surface
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — per-object routing adapter (0.3.1 baseline)
+
+- Ship a single-enclosed-room route card; multiroom/unknown-room requests remain ineligible on this baseline. No unreleased 0.4 files were copied or promoted.
+- Admit exact `excludeComponents` identities from the pinned intake, remove their actual scene objects before saving/rendering/baking, and reject ownership/intake changes against an existing master.
+- Routed exports (`routing.objectId`) require explicit `authoring.roomMeasurementComponents`. Reimport actual runtime GLB vertices, measure the selected shell envelope, preserve original geometry/material/image bytes while adding a bottom-centre composition parent, reimport and verify that handoff, then hash its real files into `artifact.json`. Missing measurements block; this does not accept a gate or visual review.
+- Expose bounded local strategy/repair candidates in the exact shared plan shape and current file bindings through `authoring.decisions`; independently authorized source hashes must also be bound, and dependency availability must be supplied by trusted host code. The CLI exposes quality snapshots only rather than inventing construction authorization. Native top-level scene-spec edits still require a base-native-spec application adapter; no fictitious componentTree or successful integration is claimed. The shared base retains Jev/auth/consent/budget/application authority. Offline contracts and opt-in Blender regressions await integration-owner execution and browser qualification.
+
 ## 0.3.1 — 2026-10-19
 
 ### Distribution

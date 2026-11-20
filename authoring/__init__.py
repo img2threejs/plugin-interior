@@ -46,6 +46,24 @@ class Context:
         return result
 
     @property
+    def ownership_binding(self):
+        from authoring.routing import exclusions
+        from tools.project_support import digest, read_json
+        declared = self.spec.get('excludeComponents')
+        snapshot = self.resolve('.img2/artifacts/interior/intake.json')
+        intake = read_json(snapshot) if snapshot.is_file() else None
+        admitted = exclusions(intake.get('excludeComponents', [])) if intake else None
+        requested = exclusions(declared) if declared is not None else admitted or ()
+        if admitted is not None and set(requested) != set(admitted):
+            raise ValueError('Scene excludeComponents disagrees with the admitted intake; start a new child revision')
+        return {'excludeComponents': sorted(requested),
+                'intakeSha256': digest(snapshot) if intake is not None else None}
+
+    @property
+    def exclude_components(self):
+        return tuple(self.ownership_binding['excludeComponents'])
+
+    @property
     def helpers(self):
         if not hasattr(self, '_helpers'):
             module = private_module(Path(__file__).with_name('geometry.py'))

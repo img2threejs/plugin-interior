@@ -46,6 +46,7 @@
   },
   "files": [
     "plugin.json",
+    "route.json",
     "steps.json",
     "gates.json",
     "SKILL.md",

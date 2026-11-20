@@ -10,6 +10,7 @@ import zipfile
 
 ROOT_FILES = (
     "plugin.json", "steps.json", "gates.json", "SKILL.md", "README.md", "LICENSE",
+    "route.json",
     "THIRD_PARTY_NOTICES.md", "licenses/Apache-2.0.txt", "SECURITY.md", "CHANGELOG.md",
     "requirements.txt", "requirements-authoring.txt", "requirements-surfaces.txt", ".gitignore",
     "package.json", ".npmignore",

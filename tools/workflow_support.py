@@ -79,6 +79,13 @@ def validate_intake(doc):
         nonempty(component, "intake component")
     if len({item.strip() for item in components}) != len(components):
         raise Refusal("intake components must be unique")
+    excluded = doc.get("excludeComponents", [])
+    if (not isinstance(excluded, list)
+            or any(not isinstance(item, str) or not item.strip() or item != item.strip() for item in excluded)
+            or len(set(excluded)) != len(excluded)):
+        raise Refusal("excludeComponents must contain unique exact component identities")
+    if not set(excluded) <= set(components):
+        raise Refusal("excludeComponents must name declared intake components")
     if not isinstance(doc.get("unknowns"), list) or any(not isinstance(item, str) for item in doc["unknowns"]):
         raise Refusal("intake unknowns must be an array of strings")
     if type(doc.get("interactionRequired")) is not bool:

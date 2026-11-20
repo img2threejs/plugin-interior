@@ -123,6 +123,21 @@ class WorkflowTests(unittest.TestCase):
         self.gate(expected=1)
         self.assertEqual(self.image.read_bytes(), PNG)
 
+    def test_exclusions_are_admitted_and_pinned_without_changing_gates(self):
+        self.intake_data["excludeComponents"] = ["sofa"]
+        self.intake.write_text(json.dumps(self.intake_data))
+        self.init()
+        self.assertEqual(json.loads(self.snapshot.read_text())["excludeComponents"], ["sofa"])
+        self.gate(expected=1)
+
+    def test_exclusions_reject_unknown_duplicate_and_ambiguous_components(self):
+        for excluded in (["unowned-unknown"], ["sofa", "sofa"], [" sofa"], "sofa"):
+            with self.subTest(excluded=excluded):
+                self.intake_data["excludeComponents"] = excluded
+                self.intake.write_text(json.dumps(self.intake_data))
+                self.init(expected=2)
+                self.assertFalse(self.snapshot.exists())
+
     def test_complete_run_and_read_only_consumers(self):
         self.complete()
         before = self.fingerprint()
