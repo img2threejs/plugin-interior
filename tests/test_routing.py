@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -271,6 +272,15 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(card['notFor']['observations']['roomCount'], ['>1'])
         self.assertEqual(card['requires']['observations']['roomCount'], [1])
         self.assertIn('route.json', json.loads((ROOT / 'package.json').read_text())['files'])
+
+    def test_routed_profile_is_in_npm_and_installable_archive(self):
+        from scripts.package_plugin import package
+        self.assertEqual(json.loads((ROOT / 'domain.json').read_text()), {'id': 'interior'})
+        self.assertIn('domain.json', json.loads((ROOT / 'package.json').read_text())['files'])
+        with tempfile.TemporaryDirectory() as output:
+            result = package(ROOT, Path(output))
+            with zipfile.ZipFile(result['archive']) as archive:
+                self.assertEqual(json.loads(archive.read('img2interior/domain.json')), {'id': 'interior'})
 
 
 @unittest.skipUnless(os.environ.get('IMG2_BLENDER_PYTHON'), 'Set IMG2_BLENDER_PYTHON for actual native handoff')
