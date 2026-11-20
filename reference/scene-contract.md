@@ -43,6 +43,21 @@ The composition GLB preserves original mesh, material and embedded image bytes, 
 
 This adapter is pinned to 0.3.1 (scene-spec 1 / runtime manifest 2), one enclosed room only. The original 0.4 WIP adds house/room identity, schema-3 transport/encoding and viewer/runtime audits; none is implicitly migrated or qualified here.
 
+## Independent mechanical replay, not terminal acceptance
+
+`python3 tools/audit_routed_artifact.py --workspace "$CHILD" --blender-python "$IMG2_BLENDER_PYTHON"` reruns the real `interior-materials` and `interior-delivery` program gates against that exact child, then starts a separate Blender >=4.3 interpreter to reopen the actual source/runtime and composition GLBs. The existing normal audits must already have pinned current inputs; all policies, delivery contracts and assets must be inside this child. Missing Blender/core/audit receipts or stale/foreign bytes fail; no status is inferred from a user checklist.
+
+The replay validates canonical D18 frame/pivot/room fields and actual file hashes, current intake/spec exclusion identities, embedded GLB resources, the actual exported camera transform graph, mesh/component/vertex inventory, measured shell dimensions and bottom-centre pivot. It independently regenerates the normalized GLB bytes from the original export to verify geometry/material/image preservation. Output binds `evidence.artifact:{path,sha256}` plus current spec, intake, source reference, builder, camera digest and audit inputs. It writes no evidence or workflow state.
+
+A successful result is only `img2.interior-routed-audit`, **not** `img2.gate-verdict`; it explicitly says `terminalAcceptance:false`. No terminal gate is registered because these required independent producer contracts do not exist on this baseline:
+
+- Artifact-bound structural turntables, self-intersection and part-coverage measurements (the replay measures vertex geometry/dimensions, not those quality criteria).
+- Admitted semantic/critical-feature review of real matched reference/render pixels, binding the same artifact, camera, spec and capture setup. Workflow attestations and `compare_views.py` contact sheets do not produce this judgment.
+- Actual composed-browser captures binding the delivered artifact and sidecars, proving atlas/probe integration and transformed cloth behavior. Native GLB import cannot establish browser rendering or interaction.
+
+Each missing producer is returned explicitly; a mechanical pass cannot admit a routed child through RouteAuthority. The unchanged legacy single-room agent workflow and its existing gates remain usable. No 0.4 WIP or browser screenshots are manufactured by this audit.
+
+
 
 ## Reusable helper surface
 

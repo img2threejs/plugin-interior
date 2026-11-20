@@ -64,6 +64,29 @@ Use observed SHA256s, not invented example digests. The tool cannot establish th
 
 Output: `.img2/artifacts/interior/delivery-audit.json`. Gate mode: `--workspace PATH --gate`; changing the contract or an asset invalidates the saved audit.
 
+## Routed mechanical audit (not a terminal gate)
+
+After the normal material/delivery audits have pinned current inputs in the exact child:
+
+```sh
+python3 tools/audit_routed_artifact.py --workspace "$CHILD" --artifact artifact.json --spec scene-spec.json --blender-python "$IMG2_BLENDER_PYTHON"
+```
+
+`--blender-python` may instead come from `IMG2_BLENDER_PYTHON`; absence fails rather
+than skipping measurements. Requires actual Blender >=4.3 and linked img2 core for
+the real subprocess audits. Artifact paths/files, intake, reference, builder,
+policies, delivery root/contracts/assets must remain inside this child with no
+symlink aliases. Existing general-purpose delivery audits still support external
+asset roots; this routed audit deliberately does not.
+
+Exit 0 means only the mechanical scope passed; exit 1 means unavailable/invalid/
+stale evidence. JSON kind is `img2.interior-routed-audit`, with exact artifact SHA,
+actual independent Blender measurements and rerun program audit reports.
+`terminalAcceptance:false` and `missingTerminalProducers` remain explicit even on
+success. No editable manifest or old workflow acceptance can fill these gaps.
+See [scene contract](scene-contract.md#independent-mechanical-replay-not-terminal-acceptance).
+
+
 ## Local decision snapshots (no provider calls)
 
 `python3 tools/interior_adapter.py --workspace W --spec scene-spec.json --request decision-request.json`
