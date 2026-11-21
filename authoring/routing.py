@@ -186,6 +186,7 @@ def produce_artifact(context, runtime, measure=measure_export):
                'excludeComponents': sorted(excluded), 'visualAcceptanceEvaluated': False}
     write_json(receipt_path, receipt)
     artifact = {'objectId': routing['objectId'], 'outputKind': '3d-scene',
+                'excludeComponents': receipt['excludeComponents'],
                 'files': [{'path': str(p.relative_to(context.workspace)), 'sha256': digest(p)}
                           for p in (output, receipt_path)],
                 'frame': {'units': 'm', 'up': '+Y', 'forward': '+Z'}, 'pivot': 'bottom-centre',

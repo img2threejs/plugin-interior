@@ -9,14 +9,17 @@ import struct
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from authoring import Context
+from authoring import Context, bound_module, context_from_args
 from authoring.decisions import candidates_for, decision_context
 from authoring.routing import apply_exclusions, exclusions, normalized_glb, produce_artifact, room_dimensions
+from authoring.routed_audit import validate_artifact
 
 
 def glb_bytes(document):
@@ -41,6 +44,12 @@ class RoutingTests(unittest.TestCase):
         self.spec = {'source': 'reference.png', 'routing': {'objectId': 'room'},
                      'excludeComponents': ['character'],
                      'authoring': {'sceneBuilder': 'build_scene.py', 'roomMeasurementComponents': ['shell']}}
+        intake = self.workspace / '.img2/artifacts/interior/intake.json'
+        intake.parent.mkdir(parents=True)
+        intake.write_text(json.dumps({'components': ['shell', 'character'], 'excludeComponents': ['character']}))
+        (self.workspace / 'state.json').write_text(json.dumps({
+            'profile': 'interior',
+            'routeChild': {'objectId': 'room', 'outputKind': '3d-scene', 'excludedObjectIds': ['character']}}))
         self.context = Context(self.workspace, self.spec, self.workspace / 'assets', self.workspace / 'evidence')
         self.document = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': [0]}],
                          'nodes': [{'name': 'shell', 'mesh': 0, 'extras': {'component': 'shell'}}],
@@ -68,7 +77,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_intake_exclusions_bind_authoring_and_mismatch_blocks(self):
         intake = self.workspace / '.img2/artifacts/interior/intake.json'
-        intake.parent.mkdir(parents=True)
+        intake.parent.mkdir(parents=True, exist_ok=True)
         intake.write_text(json.dumps({'components': ['shell', 'character'], 'excludeComponents': ['character']}))
         self.assertEqual(self.context.exclude_components, ('character',))
         first = self.context.ownership_binding
@@ -76,6 +85,211 @@ class RoutingTests(unittest.TestCase):
         self.spec['excludeComponents'] = []
         with self.assertRaisesRegex(ValueError, 'disagrees'):
             _ = self.context.exclude_components
+
+    def prepare_routed_handoff(self, excluded=None):
+        excluded = ['actor-17', 'prop-9'] if excluded is None else excluded
+        self.prepare_evidence()
+        self.spec['excludeComponents'] = list(excluded)
+        self.spec['authoring']['sourceImageSize'] = [4, 3]
+        state = {'profile': 'interior',
+                 'routeChild': {'objectId': 'room', 'outputKind': '3d-scene', 'excludedObjectIds': list(excluded)}}
+        intake = {'components': ['shell', *excluded], 'excludeComponents': list(excluded)}
+        documents = {'state': state, 'intake': intake, 'spec': self.spec}
+        self.write_handoff(documents)
+        return documents
+
+    def write_handoff(self, documents):
+        for name, relative in (('state', 'state.json'), ('spec', 'scene-spec.json'),
+                               ('intake', '.img2/artifacts/interior/intake.json')):
+            (self.workspace / relative).write_text(json.dumps(documents[name]))
+
+    def prepare_auditable_routed_handoff(self, excluded=None):
+        documents = self.prepare_routed_handoff(excluded)
+        self.document['cameras'] = [{'type': 'perspective', 'perspective': {'yfov': 0.8, 'znear': 0.1}}]
+        self.document['nodes'].append({'camera': 0, 'translation': [8, 8, 10]})
+        self.document['scenes'][0]['nodes'].append(1)
+        self.runtime.write_bytes(glb_bytes(self.document))
+        produce_artifact(self.context, self.runtime, self.measure_fixture)
+        return documents
+
+    def test_routed_handoff_uses_exact_object_ids_and_pins_local_state(self):
+        self.prepare_auditable_routed_handoff()
+        self.assertEqual(self.context.exclude_components, ('actor-17', 'prop-9'))
+        artifact = json.loads((self.workspace / 'artifact.json').read_text())
+        self.assertEqual(artifact['excludeComponents'], ['actor-17', 'prop-9'])
+        objects = [Object('Human label', 'actor-17'), Object('Chair label', 'prop-9'),
+                   Object('actor-17', 'decor'), Object('room', 'shell')]
+        apply_exclusions(objects, self.context.exclude_components, objects.remove)
+        self.assertEqual([obj.name for obj in objects], ['actor-17', 'room'])
+        result = validate_artifact(self.workspace)
+        self.assertEqual(result['excludeComponents'], ['actor-17', 'prop-9'])
+        self.assertIn({'path': 'state.json',
+                       'sha256': hashlib.sha256((self.workspace / 'state.json').read_bytes()).hexdigest()},
+                      result['inputs'])
+        self.assertNotIn('terminalAcceptance', result)
+        self.assertNotIn('accepted', result)
+
+    def test_routed_handoff_rejects_missing_malformed_or_altered_lists_in_authoring_and_audit(self):
+        original = self.prepare_auditable_routed_handoff()
+        missing = object()
+        cases = []
+        for target, key in (('child', 'excludedObjectIds'), ('intake', 'excludeComponents'),
+                            ('spec', 'excludeComponents')):
+            for value in (missing, None, 'actor-17', [], ['actor-17'], ['different-id'],
+                          ['actor-17', 'actor-17'], [' actor-17', 'prop-9'],
+                          ['prop-9', 'actor-17'], [False], {}):
+                cases.append((target, key, value))
+        for value in (missing, None, 'actor-17', ['shell', 'Human label', 'Chair label'],
+                      ['shell', 'actor-17', 'actor-17'], [False]):
+            cases.append(('intake', 'components', value))
+        for value in (missing, 'other', None):
+            cases.append(('state', 'profile', value))
+        for value in (missing, 'rigged-character', None):
+            cases.append(('child', 'outputKind', value))
+        for value in (None, [], 'interior'):
+            cases.append(('state', 'routeChild', value))
+        for value in (missing, None, 'other-room'):
+            cases.append(('child', 'objectId', value))
+        for value in (None, {}, [], 'room', {'objectId': None}, {'objectId': 'other-room'},
+                      {'objectId': ''}, {'objectId': False}, {'objectId': 'room/other'}):
+            cases.append(('spec', 'routing', value))
+        for target, key, value in cases:
+            with self.subTest(target=target, key=key, value=value):
+                documents = copy.deepcopy(original)
+                document = documents['state']['routeChild'] if target == 'child' else documents[target]
+                if value is missing:
+                    document.pop(key)
+                else:
+                    document[key] = value
+                self.write_handoff(documents)
+                self.context.spec = documents['spec']
+                with self.assertRaises(ValueError):
+                    _ = self.context.exclude_components
+                with self.assertRaises(ValueError):
+                    validate_artifact(self.workspace)
+
+    def test_matching_intake_and_spec_cannot_override_routed_exclusions(self):
+        original = self.prepare_auditable_routed_handoff()
+        for excluded in ([], ['actor-17'], ['actor-label', 'prop-label']):
+            with self.subTest(excluded=excluded):
+                documents = copy.deepcopy(original)
+                documents['intake']['excludeComponents'] = excluded
+                documents['intake']['components'] = ['shell', *excluded]
+                documents['spec']['excludeComponents'] = excluded
+                self.write_handoff(documents)
+                self.context.spec = documents['spec']
+                with self.assertRaisesRegex(ValueError, 'excludedObjectIds'):
+                    _ = self.context.exclude_components
+                with self.assertRaisesRegex(ValueError, 'excludedObjectIds'):
+                    validate_artifact(self.workspace)
+
+    def test_routed_spec_requires_state_and_route_child_before_native_loading_and_audit(self):
+        self.prepare_auditable_routed_handoff()
+        args = SimpleNamespace(workspace=str(self.workspace), spec='scene-spec.json', run_id='draft')
+        state_path = self.workspace / 'state.json'
+        for state in (None, {'profile': 'interior'}):
+            with self.subTest(state=state):
+                if state is None:
+                    state_path.unlink()
+                else:
+                    state_path.write_text(json.dumps(state))
+                with self.assertRaisesRegex(ValueError, 'requires state.json with routeChild'):
+                    _ = self.context.exclude_components
+                with patch('authoring.private_module') as load_native:
+                    with self.assertRaisesRegex(ValueError, 'requires state.json with routeChild'):
+                        bound_module('pipeline', self.context)
+                    load_native.assert_not_called()
+                with self.assertRaisesRegex(ValueError, 'requires state.json with routeChild'):
+                    context_from_args(args)
+                with self.assertRaisesRegex(ValueError, 'requires state.json with routeChild'):
+                    validate_artifact(self.workspace)
+        self.assertFalse((self.workspace / 'public/assets/interior').exists())
+        self.assertFalse((self.workspace / '.img2/artifacts/interior/production').exists())
+
+    def test_route_child_requires_spec_routing_even_if_marker_is_removed(self):
+        self.prepare_auditable_routed_handoff()
+        self.spec.pop('routing')
+        (self.workspace / 'scene-spec.json').write_text(json.dumps(self.spec))
+        with self.assertRaisesRegex(ValueError, 'routing.objectId'):
+            _ = self.context.exclude_components
+        with patch('authoring.private_module') as load_native:
+            with self.assertRaisesRegex(ValueError, 'routing.objectId'):
+                bound_module('pipeline', self.context)
+            load_native.assert_not_called()
+        with self.assertRaises(ValueError):
+            validate_artifact(self.workspace)
+
+    def test_routed_child_requires_admitted_snapshot_before_native_loading(self):
+        self.prepare_routed_handoff()
+        (self.workspace / '.img2/artifacts/interior/intake.json').unlink()
+        with patch('authoring.private_module') as load_native:
+            with self.assertRaisesRegex(ValueError, 'admitted intake'):
+                bound_module('pipeline', self.context)
+            load_native.assert_not_called()
+        args = SimpleNamespace(workspace=str(self.workspace), spec='scene-spec.json', run_id='draft')
+        with self.assertRaisesRegex(ValueError, 'admitted intake'):
+            context_from_args(args)
+        self.assertFalse((self.workspace / 'public/assets/interior').exists())
+        self.assertFalse((self.workspace / '.img2/artifacts/interior/production').exists())
+
+    def test_routed_artifact_exclusions_must_match_canonical_handoff(self):
+        self.prepare_auditable_routed_handoff()
+        artifact_path = self.workspace / 'artifact.json'
+        original = json.loads(artifact_path.read_text())
+        missing = object()
+        for excluded in (missing, None, [], 'actor-17', ['actor-17'], ['different-id'],
+                         ['actor-17', 'actor-17'], ['prop-9', 'actor-17'], [False], {}):
+            with self.subTest(excluded=excluded):
+                artifact = copy.deepcopy(original)
+                if excluded is missing:
+                    artifact.pop('excludeComponents')
+                else:
+                    artifact['excludeComponents'] = excluded
+                artifact_path.write_text(json.dumps(artifact))
+                with self.assertRaises(ValueError):
+                    validate_artifact(self.workspace)
+
+    def test_routed_explicit_empty_lists_are_valid_but_cannot_be_omitted(self):
+        documents = self.prepare_auditable_routed_handoff([])
+        self.assertEqual(self.context.exclude_components, ())
+        self.assertEqual(validate_artifact(self.workspace)['excludeComponents'], [])
+        artifact_path = self.workspace / 'artifact.json'
+        original = artifact_path.read_text()
+        artifact = json.loads(original)
+        self.assertEqual(artifact.pop('excludeComponents'), [])
+        artifact_path.write_text(json.dumps(artifact))
+        with self.assertRaises(ValueError):
+            validate_artifact(self.workspace)
+        artifact_path.write_text(original)
+        for target in ('intake', 'spec'):
+            with self.subTest(target=target):
+                changed = copy.deepcopy(documents)
+                changed[target].pop('excludeComponents')
+                self.write_handoff(changed)
+                self.context.spec = changed['spec']
+                with self.assertRaises(ValueError):
+                    _ = self.context.exclude_components
+                with self.assertRaises(ValueError):
+                    validate_artifact(self.workspace)
+
+    def test_standalone_optional_exclusions_and_order_remain_unchanged(self):
+        self.spec.pop('routing')
+        (self.workspace / 'state.json').unlink()
+        (self.workspace / '.img2/artifacts/interior/intake.json').unlink()
+        self.spec.pop('excludeComponents')
+        self.assertEqual(self.context.exclude_components, ())
+        (self.workspace / 'state.json').write_text(json.dumps({'profile': 'interior'}))
+        self.assertEqual(self.context.exclude_components, ())
+        intake_path = self.workspace / '.img2/artifacts/interior/intake.json'
+        intake_path.parent.mkdir(parents=True, exist_ok=True)
+        intake_path.write_text(json.dumps({'components': ['shell', 'character', 'prop'],
+                                           'excludeComponents': ['prop', 'character']}))
+        self.assertEqual(self.context.exclude_components, ('character', 'prop'))
+        self.spec['excludeComponents'] = ['character', 'prop']
+        self.assertEqual(self.context.exclude_components, ('character', 'prop'))
+        intake_path.write_text(json.dumps({'components': ['shell']}))
+        self.spec.pop('excludeComponents')
+        self.assertEqual(self.context.exclude_components, ())
 
     def test_normalization_preserves_binary_and_original_material_data(self):
         self.document['materials'] = [{'name': 'original', 'extras': {'provenance': 'authored'}}]
@@ -94,6 +308,7 @@ class RoutingTests(unittest.TestCase):
     def test_artifact_hashes_real_files_and_uses_measured_dimensions(self):
         result = produce_artifact(self.context, self.runtime, self.measure_fixture)
         self.assertEqual(result, json.loads((self.workspace / 'artifact.json').read_text()))
+        self.assertEqual(result['excludeComponents'], ['character'])
         self.assertEqual(result['roomDimensions'], {'width': 4, 'height': 3, 'depth': 6})
         self.assertEqual(result['scaleEstimate'], 1.0)
         self.assertEqual(result['frame'], {'units': 'm', 'up': '+Y', 'forward': '+Z'})
@@ -105,6 +320,7 @@ class RoutingTests(unittest.TestCase):
             self.assertEqual(entry['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
         receipt = json.loads((self.workspace / 'evidence/scene-measurements.json').read_text())
         self.assertFalse(receipt['visualAcceptanceEvaluated'])
+        self.assertEqual(result['excludeComponents'], receipt['excludeComponents'])
         self.assertEqual(receipt['sourceRuntime']['sha256'], hashlib.sha256(self.runtime.read_bytes()).hexdigest())
         before = (self.workspace / 'artifact.json').read_bytes()
         with self.assertRaisesRegex(ValueError, 'immutable'):
@@ -148,7 +364,7 @@ class RoutingTests(unittest.TestCase):
         for name in ('reference.png', 'build_scene.py', 'camera.json', 'render.png', 'gates.json'):
             (self.workspace / name).write_bytes(('Synthetic contract fixture: ' + name).encode())
         intake = self.workspace / '.img2/artifacts/interior/intake.json'
-        intake.parent.mkdir(parents=True)
+        intake.parent.mkdir(parents=True, exist_ok=True)
         intake.write_text(json.dumps({'components': ['shell', 'character'], 'excludeComponents': ['character']}))
         (self.workspace / 'scene-spec.json').write_text(json.dumps(self.spec))
         return {'source': 'reference.png', 'spec': 'scene-spec.json', 'builder': 'build_scene.py',
@@ -351,6 +567,11 @@ from authoring.routing import apply_exclusions, measure_export, produce_artifact
 root = Path(sys.argv[2]).resolve()
 spec = {'routing': {'objectId': 'room'}, 'excludeComponents': ['prop'],
         'authoring': {'roomMeasurementComponents': ['shell']}}
+(root/'state.json').write_text(json.dumps({'profile':'interior',
+    'routeChild':{'objectId':'room', 'outputKind':'3d-scene', 'excludedObjectIds':['prop']}}))
+intake = root/'.img2/artifacts/interior/intake.json'
+intake.parent.mkdir(parents=True)
+intake.write_text(json.dumps({'components':['shell','prop'], 'excludeComponents':['prop']}))
 context = Context(root, spec, root/'assets', root/'evidence')
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.mesh.primitive_cube_add(size=1, location=(4, 7, 1.5))

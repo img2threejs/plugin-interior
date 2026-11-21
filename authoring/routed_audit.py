@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 
+from authoring import _routed_exclusions
 from authoring.routing import _glb, bounds, exclusions, normalized_glb, room_dimensions
 from resources_lib.storage import confined
 from tools.project_support import digest, read_json
@@ -110,12 +111,17 @@ def validate_artifact(workspace, artifact_relative='artifact.json', spec_relativ
     camera_sha = canonical_sha({key: source_doc.get(key) for key in ('cameras', 'nodes', 'scenes', 'scene')})
     intake_pin = pin(workspace, '.img2/artifacts/interior/intake.json')
     intake = read_json(confined(workspace, intake_pin['path']))
+    routed = _routed_exclusions(workspace, spec, intake)
+    if routed is not None:
+        pins.append(pin(workspace, 'state.json'))
+        if exclusions(artifact.get('excludeComponents')) != routed:
+            raise ValueError('Artifact excludeComponents disagrees with routed excludedObjectIds')
     excluded = exclusions(intake.get('excludeComponents', []))
     if not set(excluded) <= set(intake.get('components', [])):
         raise ValueError('Exclusions are not admitted component identities')
     if set(exclusions(spec.get('excludeComponents', list(excluded)))) != set(excluded):
         raise ValueError('Current spec and admitted exclusion ownership disagree')
-    if set(exclusions(receipt.get('excludeComponents', []))) != set(excluded):
+    if set(exclusions(receipt.get('excludeComponents', [] if routed is None else None))) != set(excluded):
         raise ValueError('Exported exclusion provenance is stale')
     components = exclusions(spec.get('authoring', {}).get('roomMeasurementComponents', []))
     if (not components or set(components) & set(excluded)

@@ -65,6 +65,9 @@ class RoutedAuditContractTests(unittest.TestCase):
         write_json(self.workspace / 'scene-spec.json', self.spec)
         write_json(self.workspace / '.img2/artifacts/interior/intake.json',
                    {'components': ['shell', 'prop'], 'excludeComponents': ['prop']})
+        write_json(self.workspace / 'state.json',
+                   {'profile': 'interior', 'routeChild': {'objectId': 'room', 'outputKind': '3d-scene',
+                                                         'excludedObjectIds': ['prop']}})
         (self.workspace / 'reference.png').write_bytes(b'Explicit hash-only source fixture; not visual evidence')
         (self.workspace / 'builder.py').write_text('# Provenance: geometry authored by this test fixture.\n')
         self.source = self.workspace / 'runtime.glb'
@@ -82,7 +85,7 @@ class RoutedAuditContractTests(unittest.TestCase):
         self.artifact = {'objectId': 'room', 'outputKind': '3d-scene',
                          'frame': {'units': 'm', 'up': '+Y', 'forward': '+Z'},
                          'pivot': 'bottom-centre', 'scaleEstimate': 1, 'rig': None,
-                         'roomDimensions': self.dimensions, 'files': []}
+                         'roomDimensions': self.dimensions, 'excludeComponents': ['prop'], 'files': []}
         self.save_artifact()
 
     def save_artifact(self):
@@ -206,6 +209,8 @@ spec = {'routing': {'objectId':'room'}, 'source':'reference.png', 'excludeCompon
 intake = root/'.img2/artifacts/interior/intake.json'
 intake.parent.mkdir(parents=True)
 intake.write_text(json.dumps({'components':['shell'], 'excludeComponents':[]}))
+(root/'state.json').write_text(json.dumps({'profile':'interior',
+    'routeChild':{'objectId':'room', 'outputKind':'3d-scene', 'excludedObjectIds':[]}}))
 runtime = root/'runtime.glb'
 bpy.ops.export_scene.gltf(filepath=str(runtime), export_format='GLB', export_yup=True,
                           export_extras=True, export_cameras=True)
