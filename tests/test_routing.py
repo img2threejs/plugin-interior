@@ -49,7 +49,7 @@ class RoutingTests(unittest.TestCase):
         intake.write_text(json.dumps({'components': ['shell', 'character'], 'excludeComponents': ['character']}))
         (self.workspace / 'state.json').write_text(json.dumps({
             'profile': 'interior',
-            'routeChild': {'objectId': 'room', 'outputKind': '3d-scene', 'excludedObjectIds': ['character']}}))
+            'routeChild': {'objectId': 'room', 'ownerRoute': 'plugin:interior@fixture', 'outputKind': '3d-scene', 'excludedObjectIds': ['character']}}))
         self.context = Context(self.workspace, self.spec, self.workspace / 'assets', self.workspace / 'evidence')
         self.document = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': [0]}],
                          'nodes': [{'name': 'shell', 'mesh': 0, 'extras': {'component': 'shell'}}],
@@ -92,7 +92,7 @@ class RoutingTests(unittest.TestCase):
         self.spec['excludeComponents'] = list(excluded)
         self.spec['authoring']['sourceImageSize'] = [4, 3]
         state = {'profile': 'interior',
-                 'routeChild': {'objectId': 'room', 'outputKind': '3d-scene', 'excludedObjectIds': list(excluded)}}
+                 'routeChild': {'objectId': 'room', 'ownerRoute': 'plugin:interior@fixture', 'outputKind': '3d-scene', 'excludedObjectIds': list(excluded)}}
         intake = {'components': ['shell', *excluded], 'excludeComponents': list(excluded)}
         documents = {'state': state, 'intake': intake, 'spec': self.spec}
         self.write_handoff(documents)
@@ -117,6 +117,8 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(self.context.exclude_components, ('actor-17', 'prop-9'))
         artifact = json.loads((self.workspace / 'artifact.json').read_text())
         self.assertEqual(artifact['excludeComponents'], ['actor-17', 'prop-9'])
+        self.assertEqual(artifact['ownerRoute'], 'plugin:interior@fixture')
+        self.assertEqual(artifact['ownedObjectIds'], ['room'])
         objects = [Object('Human label', 'actor-17'), Object('Chair label', 'prop-9'),
                    Object('actor-17', 'decor'), Object('room', 'shell')]
         apply_exclusions(objects, self.context.exclude_components, objects.remove)
@@ -128,6 +130,17 @@ class RoutingTests(unittest.TestCase):
                       result['inputs'])
         self.assertNotIn('terminalAcceptance', result)
         self.assertNotIn('accepted', result)
+
+    def test_routed_export_refuses_missing_owner_before_measurement(self):
+        state_path = self.workspace / 'state.json'
+        state = json.loads(state_path.read_text())
+        for value in (None, '', 42):
+            with self.subTest(owner=value):
+                state['routeChild']['ownerRoute'] = value
+                state_path.write_text(json.dumps(state))
+                with patch.object(self, 'measure_fixture', side_effect=AssertionError('measured')):
+                    with self.assertRaisesRegex(ValueError, 'ownerRoute'):
+                        produce_artifact(self.context, self.runtime, self.measure_fixture)
 
     def test_routed_handoff_rejects_missing_malformed_or_altered_lists_in_authoring_and_audit(self):
         original = self.prepare_auditable_routed_handoff()
@@ -247,6 +260,12 @@ class RoutingTests(unittest.TestCase):
                     artifact['excludeComponents'] = excluded
                 artifact_path.write_text(json.dumps(artifact))
                 with self.assertRaises(ValueError):
+                    validate_artifact(self.workspace)
+        for field, value in (('ownerRoute', None), ('ownerRoute', 'other'),
+                             ('ownedObjectIds', []), ('ownedObjectIds', ['other'])):
+            with self.subTest(field=field, value=value):
+                artifact_path.write_text(json.dumps({**original, field: value}))
+                with self.assertRaisesRegex(ValueError, 'ownership'):
                     validate_artifact(self.workspace)
 
     def test_routed_explicit_empty_lists_are_valid_but_cannot_be_omitted(self):
@@ -568,7 +587,7 @@ root = Path(sys.argv[2]).resolve()
 spec = {'routing': {'objectId': 'room'}, 'excludeComponents': ['prop'],
         'authoring': {'roomMeasurementComponents': ['shell']}}
 (root/'state.json').write_text(json.dumps({'profile':'interior',
-    'routeChild':{'objectId':'room', 'outputKind':'3d-scene', 'excludedObjectIds':['prop']}}))
+    'routeChild':{'objectId':'room', 'ownerRoute':'plugin:interior@fixture', 'outputKind':'3d-scene', 'excludedObjectIds':['prop']}}))
 intake = root/'.img2/artifacts/interior/intake.json'
 intake.parent.mkdir(parents=True)
 intake.write_text(json.dumps({'components':['shell','prop'], 'excludeComponents':['prop']}))

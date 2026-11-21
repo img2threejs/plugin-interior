@@ -140,15 +140,19 @@ def produce_artifact(context, runtime, measure=measure_export):
     `measure` is a local measurement boundary for offline contract tests. Production
     always uses Blender's actual GLB importer; this is not a gate/visual acceptance.
     """
-    from tools.project_support import digest, write_bytes, write_json
+    from tools.project_support import digest, read_json, write_bytes, write_json
     routing = context.spec.get('routing')
     if not isinstance(routing, dict) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}',
                                                        str(routing.get('objectId', ''))):
         raise ValueError('Routed export requires routing.objectId')
+    excluded = set(context.exclude_components)
+    child = read_json(context.resolve('state.json'))['routeChild']
+    owner = child.get('ownerRoute')
+    if type(owner) is not str or not owner:
+        raise ValueError('Routed export requires the recorded ownerRoute')
     runtime = context.resolve(Path(runtime).relative_to(context.workspace))
     source_hash = digest(runtime)
     rows = measure(runtime)
-    excluded = set(context.exclude_components)
     if any(row['component'] in excluded for row in rows):
         raise ValueError('Exported scene still contains separately owned components')
     components = context.spec['authoring'].get('roomMeasurementComponents', [])
@@ -186,6 +190,7 @@ def produce_artifact(context, runtime, measure=measure_export):
                'excludeComponents': sorted(excluded), 'visualAcceptanceEvaluated': False}
     write_json(receipt_path, receipt)
     artifact = {'objectId': routing['objectId'], 'outputKind': '3d-scene',
+                'ownerRoute': owner, 'ownedObjectIds': [routing['objectId']],
                 'excludeComponents': receipt['excludeComponents'],
                 'files': [{'path': str(p.relative_to(context.workspace)), 'sha256': digest(p)}
                           for p in (output, receipt_path)],

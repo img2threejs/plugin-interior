@@ -116,6 +116,11 @@ def validate_artifact(workspace, artifact_relative='artifact.json', spec_relativ
         pins.append(pin(workspace, 'state.json'))
         if exclusions(artifact.get('excludeComponents')) != routed:
             raise ValueError('Artifact excludeComponents disagrees with routed excludedObjectIds')
+        child = read_json(confined(workspace, 'state.json'))['routeChild']
+        if (type(child.get('ownerRoute')) is not str or not child['ownerRoute']
+                or artifact.get('ownerRoute') != child['ownerRoute']
+                or artifact.get('ownedObjectIds') != [child.get('objectId')]):
+            raise ValueError('Artifact ownership disagrees with routed child state')
     excluded = exclusions(intake.get('excludeComponents', []))
     if not set(excluded) <= set(intake.get('components', [])):
         raise ValueError('Exclusions are not admitted component identities')

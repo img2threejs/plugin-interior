@@ -11,6 +11,7 @@
 - Require explicit matching state/intake/spec exclusion lists and declared intake components before routed native authoring and during routed artifact audit; bind current child state bytes in the mechanical audit. Standalone optional exclusions remain unchanged. Local child state is not independent authorization: the parent must rederive and validate ownership from its verified aggregate at completion, and missing independent quality/capture/semantic authority still blocks terminal acceptance. Routed handoff and tampering regressions are authored for integration-owner execution, not claimed passed.
 - Fail closed when either routed marker is missing its counterpart: scene-spec `routing` requires child `state.json`/`routeChild`, and existing `routeChild` requires a valid spec `routing.objectId` exactly matching `routeChild.objectId`. Malformed markers also fail; optional standalone behavior applies only when neither spec nor state indicates routing. Add missing-state/metadata and mismatched-identity regressions before native loading and in artifact validation.
 - Publish canonical sorted `excludeComponents` in root `artifact.json` as well as its measurement receipt, including explicit `[]`; require exact routed-list equality in the artifact audit for composition and parent validation. No new ownership or terminal authority is granted.
+- Emit composition ownership fields `ownerRoute` and `ownedObjectIds` from the routed child and check them in the audit; the parent still verifies them independently.
 
 ## 0.3.1 — 2026-10-19
 
