@@ -367,6 +367,19 @@ class RoutingTests(unittest.TestCase):
             produce_artifact(self.context, self.runtime, lambda path: copy.deepcopy(self.rows))
         self.assertFalse((self.workspace / 'artifact.json').exists())
 
+    def test_undeclared_and_duplicated_physical_identities_block_publication(self):
+        self.rows.append({'name': 'unadmitted', 'component': 'human-label',
+                          'bounds': [[0, 0, 0], [1, 1, 1]]})
+        with self.assertRaisesRegex(ValueError, 'undeclared'):
+            produce_artifact(self.context, self.runtime, self.measure_fixture)
+        self.assertFalse((self.workspace / 'artifact.json').exists())
+        self.rows.pop()
+        self.rows.append(copy.deepcopy(self.rows[0]))
+        with self.assertRaisesRegex(ValueError, 'duplicated physical'):
+            produce_artifact(self.context, self.runtime, self.measure_fixture)
+        self.assertFalse((self.workspace / 'artifact.json').exists())
+
+
     def test_malformed_external_or_rigged_glb_is_not_a_scene_handoff(self):
         for change in ({'skins': [{}]}, {'animations': [{}]}, {'images': [{'uri': '../external.png'}]},
                        {'scene': None}):

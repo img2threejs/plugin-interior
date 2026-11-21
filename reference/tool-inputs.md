@@ -64,7 +64,7 @@ Use observed SHA256s, not invented example digests. The tool cannot establish th
 
 Output: `.img2/artifacts/interior/delivery-audit.json`. Gate mode: `--workspace PATH --gate`; changing the contract or an asset invalidates the saved audit.
 
-## Routed mechanical audit (not a terminal gate)
+## Routed mechanical and structural audit
 
 After the normal material/delivery audits have pinned current inputs in the exact child:
 
@@ -79,12 +79,25 @@ policies, delivery root/contracts/assets must remain inside this child with no
 symlink aliases. Existing general-purpose delivery audits still support external
 asset roots; this routed audit deliberately does not.
 
-Exit 0 means only the mechanical scope passed; exit 1 means unavailable/invalid/
-stale evidence. JSON kind is `img2.interior-routed-audit`, with exact artifact SHA,
-actual independent Blender measurements and rerun program audit reports.
-`terminalAcceptance:false` and `missingTerminalProducers` remain explicit even on
-success. No editable manifest or old workflow acceptance can fill these gaps.
-See [scene contract](scene-contract.md#independent-mechanical-replay-not-terminal-acceptance).
+Without `--quality-output`, exit 0 means only mechanical replay passed.
+For native structural measurement and actual four-view captures, use a fresh directory:
+
+```sh
+python3 tools/audit_routed_artifact.py --workspace "$CHILD" --blender-python "$IMG2_BLENDER_PYTHON" --quality-output .img2/artifacts/interior/quality/r1 --gate
+```
+
+`--gate` requires `--quality-output` and emits exactly one `img2.gate-verdict` for
+`interior-routed-structure`. Exit 0 means only this scoped gate passed; exit 1
+means a failed check or unavailable/stale evidence. Without `--gate`, output
+stays `img2.interior-routed-audit`. The evidence carries actual geometry/capture
+measurements and current artifact/spec/reference/camera bindings. Reusing the
+output directory fails; choose a new revision, retaining failures.
+`terminalAcceptance:false` remains explicit. No candidate flags or matching
+digests authenticate a producer or replace independent native-reference semantic
+review or composed-browser acceptance. A trusted host must select/pin the Python
+interpreter, plugin code, dependencies and linked `IMG2_HOME` core; the Blender
+subprocess runs with `-I` and does not execute the workspace builder.
+See [scene contract](scene-contract.md#independent-mechanical-replay-and-scoped-structural-gate).
 
 
 ## Local decision snapshots (no provider calls)

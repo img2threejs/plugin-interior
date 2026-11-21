@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Mechanical routed-artifact audit, deliberately without terminal acceptance authority.
+"""Rerun mechanical and optional native structural producers, never visual authority.
 
-No editable report is treated as a measurement producer. Existing program audits
-are rerun and Blender reopens the actual GLBs in a separate invocation. The
-missing visual/geometry-quality/browser producers remain explicit limitations.
+No editable report is treated as a measurement producer. Program audits are rerun
+and a separate Blender invocation reopens the actual GLBs and optionally captures
+structural turntables. Reference-part recognition and browser acceptance are separate.
 """
 import hashlib
 import json
@@ -67,7 +67,7 @@ def validate_artifact(workspace, artifact_relative='artifact.json', spec_relativ
         raise ValueError('Routed artifact object/kind does not match the native spec')
     if (artifact.get('frame') != {'units': 'm', 'up': '+Y', 'forward': '+Z'}
             or artifact.get('pivot') != 'bottom-centre' or artifact.get('rig', 'missing') is not None
-            or not positive(artifact.get('scaleEstimate'))):
+            or type(artifact.get('scaleEstimate')) not in (int, float) or artifact['scaleEstimate'] != 1):
         raise ValueError('Noncanonical routed frame, pivot, scale or rig')
     dimensions = artifact.get('roomDimensions')
     if (type(dimensions) is not dict or set(dimensions) != {'width', 'height', 'depth'}
@@ -144,7 +144,8 @@ def validate_artifact(workspace, artifact_relative='artifact.json', spec_relativ
             'excludeComponents': sorted(excluded), 'measurementReceipt': receipts[0], 'inputs': pins}
 
 
-def replay_measurements(workspace, artifact_relative='artifact.json', spec_relative='scene-spec.json'):
+def replay_measurements(workspace, artifact_relative='artifact.json', spec_relative='scene-spec.json',
+                        quality_output=None):
     """Use actual Blender imports to independently replay the mechanical handoff."""
     import bpy
     from authoring.routing import measure_export
@@ -174,8 +175,9 @@ def replay_measurements(workspace, artifact_relative='artifact.json', spec_relat
     receipt = read_json(confined(workspace, snapshot['measurementReceipt']['path']))
     expected = {row['name']: row for row in receipt.get('meshes', [])}
     actual = {row['name']: row for row in rows}
-    if len(expected) != len(receipt.get('meshes', [])) or set(expected) != set(actual):
-        raise ValueError('Exported physical mesh inventory changed')
+    if (len(expected) != len(receipt.get('meshes', [])) or len(actual) != len(rows)
+            or set(expected) != set(actual)):
+        raise ValueError('Exported physical mesh inventory changed or has duplicate identities')
     for name, row in actual.items():
         old = expected[name]
         if old.get('component') != row['component'] or old.get('vertices') != row['vertices']:
@@ -188,12 +190,16 @@ def replay_measurements(workspace, artifact_relative='artifact.json', spec_relat
         if any(not math.isclose(a, b, rel_tol=1e-5, abs_tol=1e-5)
                for old_point, point in zip(old['bounds'], row['bounds']) for a, b in zip(old_point, point)):
             raise ValueError('Recorded vertex bounds disagree with the exported geometry: ' + name)
+    quality = None
+    if quality_output is not None:
+        from authoring.routed_quality import produce_quality
+        quality = produce_quality(workspace, snapshot, quality_output)
     for binding in snapshot['inputs']:
         checked_pin(workspace, binding)
     return {'artifact': snapshot['artifact'], 'inputs': snapshot['inputs'],
             'cameraSha256': snapshot['cameraSha256'], 'blenderVersion': bpy.app.version_string,
             'roomDimensions': measured_dimensions, 'boundsNativeZUp': measured_bounds,
-            'meshes': rows, 'terminalAcceptance': False,
+            'meshes': rows, 'terminalAcceptance': False, 'structure': quality,
             'scope': 'independent-glb-reimport-dimensions-pivot-ownership-byte-preservation'}
 
 
@@ -213,8 +219,9 @@ def run_audit(workspace, name):
     return verdict['evidence']
 
 
-def audit(workspace, *, blender_python, artifact_relative='artifact.json', spec_relative='scene-spec.json'):
-    """Pass only the named mechanical scope, never a terminal/visual/browser gate."""
+def audit(workspace, *, blender_python, artifact_relative='artifact.json', spec_relative='scene-spec.json',
+          quality_output=None):
+    """Rerun real producers; structural success does not decide reference fidelity."""
     workspace = Path(workspace).resolve(strict=True)
     snapshot = validate_artifact(workspace, artifact_relative, spec_relative)
     materials, delivery = run_audit(workspace, 'materials'), run_audit(workspace, 'delivery')
@@ -249,22 +256,37 @@ def audit(workspace, *, blender_python, artifact_relative='artifact.json', spec_
             'path': path.relative_to(workspace).as_posix(), 'sha256': row['sha256']}))
         if path.suffix.lower() == '.glb':
             _glb(path)
-    command = [str(blender_python), '-E', '-s', '-B', str(PLUGIN / 'tools' / 'inspect_routed_artifact.py'),
+    command = [str(blender_python), '-I', '-B', str(PLUGIN / 'tools' / 'inspect_routed_artifact.py'),
                '--workspace', str(workspace), '--artifact', artifact_relative, '--spec', spec_relative]
+    if quality_output is not None:
+        command += ['--quality-output', quality_output]
     result = subprocess.run(command, cwd=workspace, capture_output=True, text=True, timeout=300)
     records = [line[len('IMG2_ROUTED_MEASUREMENTS '):] for line in result.stdout.splitlines()
                if line.startswith('IMG2_ROUTED_MEASUREMENTS ')]
     if result.returncode != 0 or len(records) != 1:
-        raise ValueError('Independent Blender measurement producer is unavailable or failed')
+        raise ValueError('Independent Blender measurement producer failed: ' + result.stderr[-2000:])
     measurements = json.loads(records[0])
     if (measurements.get('artifact') != snapshot['artifact'] or measurements.get('inputs') != snapshot['inputs']
             or measurements.get('cameraSha256') != snapshot['cameraSha256']):
         raise ValueError('Independent measurements are stale or foreign to this artifact/camera/spec')
     for binding in snapshot['inputs'] + program_pins:
         checked_pin(workspace, binding)
-    return {'kind': 'img2.interior-routed-audit', 'version': 1, 'status': 'pass',
-            'scope': 'current-material-delivery-audits-and-independent-glb-handoff-replay',
+    structure = measurements.get('structure')
+    missing = list(MISSING_TERMINAL_PRODUCERS)
+    status = 'pass'
+    if quality_output is not None:
+        if (type(structure) is not dict or structure.get('kind') != 'img2.interior-routed-structure'
+                or structure.get('artifact') != snapshot['artifact'] or structure.get('inputs') != snapshot['inputs']
+                or structure.get('status') not in ('pass', 'fail')):
+            raise ValueError('Independent structural producer omitted its current artifact-bound result')
+        for capture in structure['captures']:
+            checked_pin(workspace, {key: capture[key] for key in ('path', 'sha256')})
+        status = structure['status']
+        missing[0] = 'independent-reference-part-coverage-review'
+    return {'kind': 'img2.interior-routed-audit', 'version': 1, 'status': status,
+            'scope': ('current-material-delivery-audits-independent-glb-replay-and-native-structure'
+                      if quality_output is not None else 'current-material-delivery-audits-and-independent-glb-handoff-replay'),
             'evidence': {'artifact': snapshot['artifact'], 'inputs': snapshot['inputs'], 'auditInputs': program_pins,
                          'cameraSha256': snapshot['cameraSha256'], 'measurements': measurements,
                          'materialAudit': materials, 'deliveryAudit': delivery},
-            'terminalAcceptance': False, 'missingTerminalProducers': list(MISSING_TERMINAL_PRODUCERS)}
+            'terminalAcceptance': False, 'missingTerminalProducers': missing}

@@ -50,19 +50,55 @@ The composition GLB preserves original mesh, material and embedded image bytes, 
 
 This adapter is pinned to 0.3.1 (scene-spec 1 / runtime manifest 2), one enclosed room only. The original 0.4 WIP adds house/room identity, schema-3 transport/encoding and viewer/runtime audits; none is implicitly migrated or qualified here.
 
-## Independent mechanical replay, not terminal acceptance
+## Independent mechanical replay and scoped structural gate
 
 `python3 tools/audit_routed_artifact.py --workspace "$CHILD" --blender-python "$IMG2_BLENDER_PYTHON"` reruns the real `interior-materials` and `interior-delivery` program gates against that exact child, then starts a separate Blender >=4.3 interpreter to reopen the actual source/runtime and composition GLBs. The existing normal audits must already have pinned current inputs; all policies, delivery contracts and assets must be inside this child. Missing Blender/core/audit receipts or stale/foreign bytes fail; no status is inferred from a user checklist.
 
-The replay validates canonical D18 frame/pivot/room fields and actual file hashes, current intake/spec exclusion identities, embedded GLB resources, the actual exported camera transform graph, mesh/component/vertex inventory, measured shell dimensions and bottom-centre pivot. It independently regenerates the normalized GLB bytes from the original export to verify geometry/material/image preservation. Output binds `evidence.artifact:{path,sha256}` plus current spec, intake, source reference, builder, camera digest and audit inputs. It writes no evidence or workflow state.
+The replay validates canonical D18 frame/pivot/room fields and actual file hashes, current intake/spec exclusion identities, embedded GLB resources, the actual exported camera transform graph, mesh/component/vertex inventory, measured shell dimensions and bottom-centre pivot. It independently regenerates normalized GLB bytes to verify geometry/material/image preservation. Output binds the current artifact/spec/intake/reference/builder/camera and audit inputs. Mechanical replay writes no evidence; optional structural capture writes only its fresh directory. Neither mode updates workflow state.
 
-A successful result is only `img2.interior-routed-audit`, **not** `img2.gate-verdict`; it explicitly says `terminalAcceptance:false`. No terminal gate is registered because these required independent producer contracts do not exist on this baseline:
+Without `--quality-output`, success remains only mechanical replay. With
+`--quality-output .img2/artifacts/interior/quality/REV`, the separate Blender process
+also imports the delivered composition, checks every triangle for intra-mesh
+intersections/degeneracy, and renders actual 0/90/180/270° orthographic silhouettes.
+It decodes the persisted PNG alpha and reports front/side pixel areas, actual
+geometry extents, physical mesh inventory and missing/unexpected component IDs.
+The directory must be fresh; failed evidence is retained, never overwritten.
 
-- Artifact-bound structural turntables, self-intersection and part-coverage measurements (the replay measures vertex geometry/dimensions, not those quality criteria).
-- Admitted semantic/critical-feature review of real matched reference/render pixels, binding the same artifact, camera, spec and capture setup. Workflow attestations and `compare_views.py` contact sheets do not produce this judgment.
-- Actual composed-browser captures binding the delivered artifact and sidecars, proving atlas/probe integration and transformed cloth behavior. Native GLB import cannot establish browser rendering or interaction.
+Add `--gate` to emit `img2.gate-verdict` for **`interior-routed-structure` only**.
+It requires the native structural producer and enforces the frozen volumetric
+depth 0.15 and side/front 0.25 floors, zero measured self-intersections, no
+degenerate triangles and complete admitted component inventory. The ordinary
+three gates remain unchanged; this optional scoped gate is not terminal acceptance.
+The JSON's `evidence.evidence.measurements.structure` contains current artifact,
+spec/reference/camera/input bindings, checks, capture setup and actual captures.
+Its `evidence` explicitly records `artifactSha256`, `referenceSha256`,
+`specSha256`, `sourceRuntimeSha256`, `modelSha256`, `cameraSha256` and
+`viewSetSha256`. The last hashes canonical JSON `{captures,setup}` using sorted
+keys and compact separators, binding actual persisted PNG hashes and camera poses.
 
-Each missing producer is returned explicitly; a mechanical pass cannot admit a routed child through RouteAuthority. The unchanged legacy single-room agent workflow and its existing gates remain usable. No 0.4 WIP or browser screenshots are manufactured by this audit.
+Triangle interiors are inset by relative `1e-6` to exclude boundary-only contact;
+the result reports that tolerance and all intersecting triangle pairs. This is
+an all-triangle intra-mesh check, not inter-object penetration or mathematical
+exactness below that tolerance. Opaque emission masks establish geometry
+silhouette, not PBR appearance or source-camera fidelity.
+
+Component inventory uses exact tags and actual imported geometry. It cannot
+recognize whether a mesh depicts a required real reference part:
+`partCoverageStatus` and `semanticReviewStatus` stay `unevaluated`, and no
+`partCoveragePassed:true` is manufactured. Native reference/critical-feature
+review must independently inspect real source/matched-render pixels.
+Composed-browser atlas/probe/cloth acceptance is also separate. These missing
+producers remain explicit even when the structural gate passes, and
+`terminalAcceptance:false` remains invariant. No procedural fixture is an
+independent expert corpus or reference-fidelity qualification.
+
+**Host trust boundary:** the interpreter path is selected by trusted host code,
+not scene/model JSON. The parent must independently approve and pin interpreter,
+plugin producer sources and dependencies before/after invocation. `-I` disables
+Python environment/user-site injection for replay; neither a matching digest,
+a returned producer name nor an editable success record authenticates a producer.
+The workspace builder is bound but is never executed by this independent audit.
+The existing core material/delivery subprocesses require a trusted `IMG2_HOME`.
 
 
 

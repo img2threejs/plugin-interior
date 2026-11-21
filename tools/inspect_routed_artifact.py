@@ -16,8 +16,10 @@ def main():
     parser.add_argument('--workspace', required=True)
     parser.add_argument('--artifact', default='artifact.json')
     parser.add_argument('--spec', default='scene-spec.json')
+    parser.add_argument('--quality-output', help='Fresh workspace-relative directory for actual structural captures')
     args = parser.parse_args()
-    report = replay_measurements(Path(args.workspace).resolve(strict=True), args.artifact, args.spec)
+    report = replay_measurements(Path(args.workspace).resolve(strict=True), args.artifact, args.spec,
+                                 quality_output=args.quality_output)
     print('IMG2_ROUTED_MEASUREMENTS ' + json.dumps(report, allow_nan=False, sort_keys=True), flush=True)
 
 

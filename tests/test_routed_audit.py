@@ -13,7 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from authoring.routed_audit import MISSING_TERMINAL_PRODUCERS, validate_artifact
+from authoring.routed_audit import MISSING_TERMINAL_PRODUCERS, canonical_sha, validate_artifact
 from authoring.routing import normalized_glb
 
 
@@ -106,7 +106,7 @@ class RoutedAuditContractTests(unittest.TestCase):
     def test_wrong_frame_dimensions_hash_and_ownership_are_rejected(self):
         original = copy.deepcopy(self.artifact)
         for mutation in ({'frame': {'units': 'cm', 'up': '+Z', 'forward': '+Y'}},
-                         {'pivot': 'centre'}, {'scaleEstimate': True}, {'rig': {}},
+                         {'pivot': 'centre'}, {'scaleEstimate': True}, {'scaleEstimate': 2}, {'rig': {}},
                          {'roomDimensions': {'width': 4, 'height': 0, 'depth': 6}}, {'objectId': 'other'}):
             with self.subTest(mutation=mutation):
                 self.artifact = {**copy.deepcopy(original), **mutation}
@@ -155,6 +155,18 @@ class RoutedAuditContractTests(unittest.TestCase):
         self.assertEqual(report['evidence']['artifact']['sha256'], sha(self.workspace / 'artifact.json'))
         self.assertEqual(report['missingTerminalProducers'], list(MISSING_TERMINAL_PRODUCERS))
         self.assertNotEqual(report['kind'], 'img2.gate-verdict')
+
+    def test_structural_gate_cannot_silently_fall_back_to_mechanical_replay(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/audit_routed_artifact.py'),
+                                 '--workspace', str(self.workspace), '--gate'],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report['kind'], 'img2.gate-verdict')
+        self.assertEqual(report['gate'], 'interior-routed-structure')
+        self.assertEqual(report['status'], 'fail')
+        self.assertIn('--quality-output', report['reasons'][0])
+        self.assertFalse(report['terminalAcceptance'])
 
     def test_audit_is_not_registered_as_a_terminal_or_legacy_gate(self):
         gates = json.loads((ROOT / 'gates.json').read_text())
@@ -256,6 +268,37 @@ contract = {'schemaVersion':1, 'root':str(root), 'assets':assets,
             self.assertEqual(report['evidence']['artifact'], {'path':'artifact.json','sha256':sha(workspace/'artifact.json')})
             self.assertEqual(report['evidence']['measurements']['artifact'], report['evidence']['artifact'])
             self.assertTrue(report['missingTerminalProducers'])
+            # A real independent structural gate produces pixels, not an editable
+            # success claim. This synthetic cube is NOT reference-fidelity proof.
+            result = subprocess.run([sys.executable, str(ROOT/'tools/audit_routed_artifact.py'),
+                                     '--workspace', str(workspace), '--blender-python', os.environ['IMG2_BLENDER_PYTHON'],
+                                     '--quality-output', 'quality-r1', '--gate'],
+                                    capture_output=True, text=True, env=env, timeout=300)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            gate = json.loads(result.stdout)
+            self.assertEqual(gate['gate'], 'interior-routed-structure')
+            self.assertFalse(gate['terminalAcceptance'])
+            structure = gate['evidence']['evidence']['measurements']['structure']
+            self.assertEqual(structure['measurements']['selfIntersectionCount'], 0)
+            self.assertEqual([row['angle'] for row in structure['captures']], [0, 90, 180, 270])
+            self.assertEqual(structure['partCoverageStatus'], 'unevaluated')
+            self.assertEqual(structure['semanticReviewStatus'], 'unevaluated')
+            self.assertNotIn('partCoveragePassed', structure['measurements'])
+            self.assertEqual(structure['evidence']['artifactSha256'], sha(workspace / 'artifact.json'))
+            self.assertEqual(structure['evidence']['referenceSha256'], sha(workspace / 'reference.png'))
+            self.assertEqual(structure['evidence']['sourceRuntimeSha256'], sha(workspace / 'runtime.glb'))
+            self.assertEqual(structure['evidence']['specSha256'], sha(workspace / 'scene-spec.json'))
+            self.assertEqual(structure['evidence']['viewSetSha256'],
+                             canonical_sha({'captures': structure['captures'], 'setup': structure['captureSetup']}))
+            for row in structure['captures']:
+                self.assertGreater(row['foregroundPixels'], 0)
+                self.assertEqual(row['sha256'], sha(workspace / row['path']))
+            result = subprocess.run([sys.executable, str(ROOT/'tools/audit_routed_artifact.py'),
+                                     '--workspace', str(workspace), '--blender-python', os.environ['IMG2_BLENDER_PYTHON'],
+                                     '--quality-output', 'quality-r1', '--gate'],
+                                    capture_output=True, text=True, env=env, timeout=300)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('immutable', json.loads(result.stdout)['reasons'][0])
             runtime = workspace / 'runtime.glb'
             runtime.write_bytes(runtime.read_bytes() + b'changed after audited export')
             result = subprocess.run([sys.executable, str(ROOT/'tools/audit_routed_artifact.py'),

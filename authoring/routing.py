@@ -116,14 +116,18 @@ def measure_export(path):
         bpy.ops.import_scene.gltf(filepath=str(path))
         bpy.context.view_layer.update()
         rows = []
+        names = set()
         for obj in temporary.objects:
             if obj.type != 'MESH':
                 continue
             component = obj.get('component')
-            if not component:
-                raise ValueError('Exported mesh lost its component identity: ' + obj.name)
+            exclusions([component])
+            name = obj.get('physical_id', obj.name)
+            if type(name) is not str or not name or name in names:
+                raise ValueError('Missing or duplicate exported physical mesh identity: ' + obj.name)
+            names.add(name)
             points = [list(obj.matrix_world @ vertex.co) for vertex in obj.data.vertices]
-            row = {'name': obj.get('physical_id', obj.name), 'component': component, 'bounds': points}
+            row = {'name': name, 'component': component, 'bounds': points}
             box = bounds([row])
             rows.append({**row, 'bounds': [box['min'], box['max']], 'vertices': len(points)})
         bounds(rows)
@@ -153,6 +157,9 @@ def produce_artifact(context, runtime, measure=measure_export):
     runtime = context.resolve(Path(runtime).relative_to(context.workspace))
     source_hash = digest(runtime)
     rows = measure(runtime)
+    admitted = set(exclusions(read_json(context.resolve('.img2/artifacts/interior/intake.json'))['components']))
+    if any(row['component'] not in admitted for row in rows):
+        raise ValueError('Exported geometry has undeclared component identities')
     if any(row['component'] in excluded for row in rows):
         raise ValueError('Exported scene still contains separately owned components')
     components = context.spec['authoring'].get('roomMeasurementComponents', [])
@@ -171,6 +178,11 @@ def produce_artifact(context, runtime, measure=measure_export):
     write_bytes(output, payload)
     output_hash = digest(output)
     measured = measure(output)
+    if (len({row['name'] for row in rows}) != len(rows)
+            or len({row['name'] for row in measured}) != len(measured)
+            or {row['name']: row['component'] for row in rows}
+               != {row['name']: row['component'] for row in measured}):
+        raise ValueError('Exported composition changed or duplicated physical component identities')
     delivered = bounds(measured)
     pivot = [(delivered['min'][0] + delivered['max'][0]) / 2,
              (delivered['min'][1] + delivered['max'][1]) / 2, delivered['min'][2]]
