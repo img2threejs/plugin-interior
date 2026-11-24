@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased — per-object routing adapter (0.3.1 baseline)
+## 0.3.2 — unreleased
 
+- Give the routed adapter a distinct source/package/skill version rather than reusing published 0.3.1; no release tag or publication is implied.
+- Include the routed tools and regression tests in the scoped Apache-2.0 component notices; retain the repository's mixed-license boundary.
+- Weld shared triangle positions before BVH queries and use normalized double-precision contact predicates plus coplanar clipping. Preserve real crossings, folds, duplicate faces, degeneracy and topology counts without increasing the `1e-6` relative contact tolerance.
+- Declare `interior-bpy>=4.3` against the host-approved `IMG2_BLENDER_PYTHON`, matching native producers instead of requiring a separate `blender` executable. Core discovery/completion support and bpy-only end-to-end qualification remain required cross-repository integration checks.
 - Ship a single-enclosed-room route card; multiroom/unknown-room requests remain ineligible on this baseline. No unreleased 0.4 files were copied or promoted.
 - Admit exact `excludeComponents` identities from the pinned intake, remove their actual scene objects before saving/rendering/baking, and reject ownership/intake changes against an existing master.
 - Routed exports (`routing.objectId`) require explicit `authoring.roomMeasurementComponents`. Reimport actual runtime GLB vertices, measure the selected shell envelope, preserve original geometry/material/image bytes while adding a bottom-centre composition parent, reimport and verify that handoff, then hash its real files into `artifact.json`. Missing measurements block; this does not accept a gate or visual review.

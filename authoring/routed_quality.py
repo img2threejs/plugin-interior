@@ -15,9 +15,122 @@ from tools.project_support import digest, read_json, write_json
 
 ANGLES = (0, 90, 180, 270)
 RESOLUTION = 256
-# Relative geometric tolerance, not a quality-policy threshold. Shrinking triangles
-# excludes boundary-only contact (shared edges/vertices) from surface crossings.
+# Relative geometric contact tolerance, not a quality-policy threshold.
 CONTACT_TOLERANCE = 1e-6
+# Plane arithmetic uses double precision after normalizing the mesh envelope.
+_PLANE_ROUNDOFF = 64 * math.ulp(1.0)
+
+
+def _subtract(a, b):
+    return tuple(x - y for x, y in zip(a, b))
+
+
+def _dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0])
+
+
+def _distances(triangle, other, normal):
+    return [_dot(_subtract(point, other[0]), normal) for point in triangle]
+
+
+def _coplanar(a, b, normal_a, normal_b):
+    return (max(abs(value) for value in _distances(a, b, normal_b)) <= _PLANE_ROUNDOFF
+            and max(abs(value) for value in _distances(b, a, normal_a)) <= _PLANE_ROUNDOFF)
+
+
+def _coplanar_area(a, b, normal):
+    """Clip projected triangles; shared edges/points have zero intersection area."""
+    axis = max(range(3), key=lambda index: abs(normal[index]))
+    project = lambda point: tuple(value for index, value in enumerate(point) if index != axis)
+    polygon, clip = list(map(project, a)), list(map(project, b))
+
+    def side(start, end, point):
+        return ((end[0] - start[0]) * (point[1] - start[1])
+                - (end[1] - start[1]) * (point[0] - start[0]))
+
+    orientation = 1 if side(*clip) > 0 else -1
+    for start, end in zip(clip, clip[1:] + clip[:1]):
+        output = []
+        for previous, current in zip(polygon[-1:] + polygon[:-1], polygon):
+            before, after = orientation * side(start, end, previous), orientation * side(start, end, current)
+            if (before >= 0) != (after >= 0):
+                fraction = before / (before - after)
+                output.append(tuple(x + fraction * (y - x) for x, y in zip(previous, current)))
+            if after >= 0:
+                output.append(current)
+        polygon = output
+        if not polygon:
+            return 0
+    origin = polygon[0]
+    relative = [(point[0] - origin[0], point[1] - origin[1]) for point in polygon]
+    return abs(math.fsum(a[0] * b[1] - a[1] * b[0]
+                         for a, b in zip(relative, relative[1:] + relative[:1]))) / 2
+
+
+def _interiors_cross(a, b, normal_a, normal_b):
+    if normal_a is None or normal_b is None:
+        return False  # Degeneracy is reported separately and fails the gate.
+    # Preserve the original per-triangle relative contact policy, but apply it in
+    # Python double precision only after the welded BVH has found candidates.
+    def inset(triangle):
+        center = tuple(sum(point[axis] for point in triangle) / 3 for axis in range(3))
+        return tuple(tuple(c + (v - c) * (1 - CONTACT_TOLERANCE) for c, v in zip(center, point))
+                     for point in triangle)
+
+    a, b = inset(a), inset(b)
+    if _coplanar(a, b, normal_a, normal_b):
+        return _coplanar_area(a, b, normal_a) > _PLANE_ROUNDOFF ** 2
+    distances_a, distances_b = _distances(a, b, normal_b), _distances(b, a, normal_a)
+    # Both interiors must straddle the other plane: touching along a shared edge
+    # or only at one vertex is not a crossing, even when BVH float32 math drifts.
+    if any(min(values) >= -_PLANE_ROUNDOFF or max(values) <= _PLANE_ROUNDOFF
+           for values in (distances_a, distances_b)):
+        return False
+    direction = _cross(normal_a, normal_b)
+    length = math.hypot(*direction)
+    direction = tuple(value / length for value in direction)
+
+    def interval(triangle, distances):
+        positions = []
+        for index, point in enumerate(triangle):
+            following = (index + 1) % 3
+            before, after = distances[index], distances[following]
+            if before == 0:
+                positions.append(_dot(point, direction))
+            if before * after < 0:
+                fraction = before / (before - after)
+                intersection = tuple(x + fraction * (y - x) for x, y in zip(point, triangle[following]))
+                positions.append(_dot(intersection, direction))
+        return min(positions), max(positions)
+
+    start_a, end_a = interval(a, distances_a)
+    start_b, end_b = interval(b, distances_b)
+    return min(end_a, end_b) - max(start_a, start_b) > _PLANE_ROUNDOFF
+
+
+def _coplanar_pairs(triangles, normals, axis):
+    """Supplement BVH's coplanar/shared-edge exclusions with an AABB sweep."""
+    boxes = [(tuple(min(point[a] for point in triangle) for a in range(3)),
+              tuple(max(point[a] for point in triangle) for a in range(3))) for triangle in triangles]
+    other_axes = tuple(a for a in range(3) if a != axis)
+    active = []
+    for index in sorted(range(len(boxes)), key=lambda index: boxes[index][0][axis]):
+        low, high = boxes[index]
+        active = [other for other in active if boxes[other][1][axis] >= low[axis]]
+        for other in active:
+            normal_a, normal_b = normals[other], normals[index]
+            if (any(boxes[other][1][a] < low[a] or high[a] < boxes[other][0][a] for a in other_axes)
+                    or normal_a is None or normal_b is None
+                    or abs(_dot(normal_a, normal_b)) < 1 - _PLANE_ROUNDOFF):
+                continue
+            if _coplanar(triangles[other], triangles[index], normal_a, normal_b):
+                yield tuple(sorted((other, index)))
+        active.append(index)
 
 
 def inventory_coverage(rows, admitted, excluded):
@@ -30,47 +143,51 @@ def inventory_coverage(rows, admitted, excluded):
 
 
 def mesh_integrity(obj):
-    """Inspect every actual triangle, including UV-split duplicates after welding.
+    """Inspect every actual triangle, welding only exactly equal imported vertices.
 
-    BVH overlap is Blender's triangle/triangle query, not bounding-box overlap.
-    Triangle interiors are inset by a declared relative contact tolerance. Results
-    establish no intersections above that tolerance, not mathematical exactness.
-    Degenerate triangles fail rather than being silently omitted.
+    A welded BVH finds noncoplanar candidates without losing shared topology.
+    Double-precision interior predicates reject boundary-only contact; a coplanar
+    sweep retains fold/duplicate/overlap detection that BVH itself excludes.
+    Geometry is normalized before predicates, keeping the declared relative
+    tolerance independent of the mesh's world translation or scale.
     """
     from mathutils.bvhtree import BVHTree
     mesh = obj.data
     mesh.calc_loop_triangles()
-    vertices = [obj.matrix_world @ vertex.co for vertex in mesh.vertices]
+    vertices = [tuple(obj.matrix_world @ vertex.co) for vertex in mesh.vertices]
     if not vertices or any(not math.isfinite(v) for point in vertices for v in point):
         raise ValueError('Missing or nonfinite delivered geometry: ' + obj.name)
     triangles = [tuple(face.vertices) for face in mesh.loop_triangles]
     if not triangles:
         raise ValueError('Delivered mesh has no physical triangles: ' + obj.name)
     box = bounds([{'bounds': [list(point) for point in vertices]}])
-    span = max(box['max'][a] - box['min'][a] for a in range(3))
+    axis = max(range(3), key=lambda a: box['max'][a] - box['min'][a])
+    span = box['max'][axis] - box['min'][axis]
     if span <= 0:
         raise ValueError('Delivered mesh has zero extent: ' + obj.name)
-    # Weld only exactly coincident imported positions: UV/material seams are not
-    # holes, while small real gaps must remain visible in the topology result.
     welded, identities = {}, []
     for point in vertices:
-        identities.append(welded.setdefault(tuple(point), len(welded)))
-    edges, inset, faces = {}, [], []
+        identities.append(welded.setdefault(point, len(welded)))
+    points = [tuple((point[a] - box['min'][a]) / span for a in range(3)) for point in welded]
+    faces = [tuple(identities[index] for index in triangle) for triangle in triangles]
+    geometry, normals, edges = [], [], {}
     degenerate = 0
-    for triangle in triangles:
-        a, b, c = (vertices[index] for index in triangle)
-        if (b - a).cross(c - a).length <= (span * CONTACT_TOLERANCE) ** 2:
+    for face in faces:
+        triangle = tuple(points[index] for index in face)
+        normal = _cross(_subtract(triangle[1], triangle[0]), _subtract(triangle[2], triangle[0]))
+        area = math.hypot(*normal)
+        if area <= CONTACT_TOLERANCE ** 2:
             degenerate += 1
-        ids = [identities[index] for index in triangle]
-        for x, y in zip(ids, ids[1:] + ids[:1]):
+        geometry.append(triangle)
+        normals.append(tuple(value / area for value in normal) if area else None)
+        for x, y in zip(face, face[1:] + face[:1]):
             key = tuple(sorted((x, y)))
             edges[key] = edges.get(key, 0) + 1
-        center = (a + b + c) / 3
-        start = len(inset)
-        inset.extend(center + (point - center) * (1 - CONTACT_TOLERANCE) for point in (a, b, c))
-        faces.append((start, start + 1, start + 2))
-    tree = BVHTree.FromPolygons(inset, faces, all_triangles=True, epsilon=0.0)
-    intersections = sorted({tuple(sorted((a, b))) for a, b in tree.overlap(tree) if a != b})
+    tree = BVHTree.FromPolygons(points, faces, all_triangles=True, epsilon=0.0)
+    candidates = {tuple(sorted((a, b))) for a, b in tree.overlap(tree) if a != b}
+    candidates.update(_coplanar_pairs(geometry, normals, axis))
+    intersections = sorted((a, b) for a, b in candidates
+                           if _interiors_cross(geometry[a], geometry[b], normals[a], normals[b]))
     return {'name': obj.get('physical_id', obj.name), 'component': obj['component'],
             'triangles': len(triangles), 'degenerateTriangles': degenerate,
             'boundaryEdges': sum(count == 1 for count in edges.values()),

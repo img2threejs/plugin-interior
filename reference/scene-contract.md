@@ -48,7 +48,7 @@ The artifact also carries the child state's `ownerRoute` and `ownedObjectIds:[ob
 
 The composition GLB preserves original mesh, material and embedded image bytes, adding a scene parent translation and updating cloth origin extras. It is reimported to verify the bottom-centre pivot and unchanged shell measurements. Existing runtime GLB/manifest, viewer, portable GLB and native master stay unchanged. This is a static composition handoff, not a claim that the current viewer accepts transformed cloth roots. Missing/invalid shell geometry, excluded meshes, external GLB resources, rigs or unverifiable measurements block artifact publication. Room dimensions describe the selected authored shell envelope, not recovered real-world room dimensions. All existing delivery/material/workflow gates and independent visual/runtime review remain mandatory.
 
-This adapter is pinned to 0.3.1 (scene-spec 1 / runtime manifest 2), one enclosed room only. The original 0.4 WIP adds house/room identity, schema-3 transport/encoding and viewer/runtime audits; none is implicitly migrated or qualified here.
+This source adapter targets 0.3.2 (scene-spec 1 / runtime manifest 2), one enclosed room only. The original 0.4 WIP adds house/room identity, schema-3 transport/encoding and viewer/runtime audits; none is implicitly migrated or qualified here.
 
 ## Independent mechanical replay and scoped structural gate
 
@@ -76,8 +76,10 @@ Its `evidence` explicitly records `artifactSha256`, `referenceSha256`,
 `viewSetSha256`. The last hashes canonical JSON `{captures,setup}` using sorted
 keys and compact separators, binding actual persisted PNG hashes and camera poses.
 
-Triangle interiors are inset by relative `1e-6` to exclude boundary-only contact;
-the result reports that tolerance and all intersecting triangle pairs. This is
+Exactly coincident vertices retain shared indices in the BVH. Normalized
+double-precision predicates exclude edge/vertex-only contact at relative `1e-6`;
+coplanar clipping also detects folded and duplicate faces that BVH alone omits.
+The result reports that tolerance and all intersecting triangle pairs. This is
 an all-triangle intra-mesh check, not inter-object penetration or mathematical
 exactness below that tolerance. Opaque emission masks establish geometry
 silhouette, not PBR appearance or source-camera fidelity.

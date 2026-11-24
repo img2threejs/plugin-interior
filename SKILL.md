@@ -2,7 +2,7 @@
 name: img2-interior
 description: Builds image-led interiors through Blender/Python, PBR, render-and-repair, bake/export and an interactive Three.js viewer; verifies native/runtime/portable delivery with img2.
 license: LicenseRef-img2-Interior-Free-Use-Restricted-Commercialization-1.0. See LICENSE and THIRD_PARTY_NOTICES.md.
-version: 0.3.1
+version: 0.3.2
 ---
 
 # Image → authored interior → working delivery

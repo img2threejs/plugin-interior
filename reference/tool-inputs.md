@@ -73,8 +73,10 @@ python3 tools/audit_routed_artifact.py --workspace "$CHILD" --artifact artifact.
 ```
 
 `--blender-python` may instead come from `IMG2_BLENDER_PYTHON`; absence fails rather
-than skipping measurements. Requires actual Blender >=4.3 and linked img2 core for
-the real subprocess audits. Artifact paths/files, intake, reference, builder,
+than skipping measurements. Requires a compatible bpy interpreter (Blender API
+>=4.3) and linked img2 core for the real subprocess audits. A `blender` executable
+is not required; host-approved `IMG2_BLENDER_PYTHON` selects the native producer.
+Artifact paths/files, intake, reference, builder,
 policies, delivery root/contracts/assets must remain inside this child with no
 symlink aliases. Existing general-purpose delivery audits still support external
 asset roots; this routed audit deliberately does not.
@@ -122,8 +124,10 @@ Strategy/repair expose one to three candidates with exactly `id`, `passId`, `com
 identifier syntax and pass-specific operation/field allowlists are enforced. Components must
 be admitted and not separately owned. Each material source is a real bound SHA-256 also in
 the trusted host's independent authorization set; a provenance claim or filename is not
-authorization. Resource operations require nonempty sources. Native plans require a `blender`
-dependency already verified by the host; missing availability is not inferred. `rigHandoff`
+authorization. Resource operations require nonempty sources. Native plans retain the `blender`
+capability identifier, verified by the host using the routed `interior-bpy>=4.3`
+probe and that same trusted `IMG2_BLENDER_PYTHON`; the identifier does not require
+a `blender` executable. Missing availability is not inferred. `rigHandoff`
 must be explicitly false: this static interior adapter has no verified skeleton handoff.
 Quality-review candidates remain empty. Arbitrary code/argv, old private plan fields,
 threshold edits, unknown dependencies and excluded-component mutations are rejected.

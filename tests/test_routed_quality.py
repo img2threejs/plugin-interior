@@ -68,5 +68,100 @@ print('NATIVE_TRIANGLE_INTEGRITY ' + json.dumps({'crossing': crossing, 'adjacent
         self.assertEqual(json.loads(rows[0])['crossing']['selfIntersectionCount'], 1)
 
 
+    def geometry_results(self, fixture):
+        script = r'''
+import json, sys
+import bpy
+sys.path.insert(0, sys.argv[1])
+from authoring.routed_quality import mesh_integrity
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def inspect(name, points, faces):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(points, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj['component'] = 'shell'
+    return mesh_integrity(obj)
+''' + fixture + "\nprint('GEOMETRY_RESULTS ' + json.dumps(results))"
+        process = subprocess.run([os.environ['IMG2_BLENDER_PYTHON'], '-I', '-B', '-c',
+                                  script, str(ROOT)], capture_output=True, text=True, timeout=90)
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        records = [line.removeprefix('GEOMETRY_RESULTS ') for line in process.stdout.splitlines()
+                   if line.startswith('GEOMETRY_RESULTS ')]
+        self.assertEqual(len(records), 1, process.stdout)
+        return json.loads(records[0])
+
+    def test_dense_and_off_origin_spheres_have_no_crossings(self):
+        results = self.geometry_results(r'''
+results = []
+for x in (0, 5):
+    for segments in (32, 128):
+        for radius in (1, 0.3):
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=segments // 2,
+                                               radius=radius, location=(x, 0, 0))
+            obj = bpy.context.object
+            obj['component'] = 'shell'
+            bpy.context.view_layer.update()
+            report = mesh_integrity(obj)
+            results.append({'x': x, 'segments': segments, 'radius': radius,
+                            'crossings': report['selfIntersectionCount'],
+                            'degenerate': report['degenerateTriangles'],
+                            'boundary': report['boundaryEdges'],
+                            'nonManifold': report['nonManifoldEdges']})
+            bpy.data.objects.remove(obj, do_unlink=True)
+''')
+        for row in results:
+            with self.subTest(x=row['x'], segments=row['segments'], radius=row['radius']):
+                self.assertEqual(row['crossings'], 0, row)
+                self.assertEqual(row['degenerate'], 0, row)
+                self.assertEqual(row['boundary'], 0, row)
+                self.assertEqual(row['nonManifold'], 0, row)
+
+    def test_shared_topology_does_not_hide_folded_or_crossing_interiors(self):
+        results = self.geometry_results(r'''
+results = {}
+cases = {
+    'point-contact': ([(0,0,0),(2,0,0),(0,2,0),(-1,0,1),(0,-1,1)],
+                      [(0,1,2),(0,3,4)]),
+    'point-crossing': ([(0,0,0),(2,0,0),(0,2,0),(1,1,-1),(1,1,1)],
+                       [(0,1,2),(0,3,4)]),
+    'coplanar-point-overlap': ([(0,0,0),(2,0,0),(0,2,0),(1,0.2,0),(0.2,1,0)],
+                               [(0,1,2),(0,3,4)]),
+    'coplanar-disconnected-overlap': ([(0,0,0),(2,0,0),(0,2,0),
+                                      (0.2,0.2,0),(1.5,0.2,0),(0.2,1.5,0)],
+                                     [(0,1,2),(3,4,5)]),
+    'near-coplanar-edge-contact': ([(0,0,0),(2,0,0),(0,2,0),(1,1,0.0000001)],
+                                  [(0,1,2),(1,0,3)]),
+    'parallel-gap': ([(0,0,0),(2,0,0),(0,2,0),
+                      (0,0,0.00001),(2,0,0.00001),(0,2,0.00001)],
+                     [(0,1,2),(3,4,5)]),
+    'folded-edge': ([(0,0,0),(2,0,0),(0,2,0),(1,1,0)], [(0,1,2),(1,0,3)]),
+    'duplicate-face': ([(0,0,0),(2,0,0),(0,2,0)], [(0,1,2),(2,1,0)]),
+    'small-crossing-large-envelope': ([(0,0,0),(2,0,0),(0,2,0),
+                                       (1,1,-0.00001),(1,1,0.00001),
+                                       (100,100,100),(101,100,100),(100,101,100)],
+                                      [(0,1,2),(0,3,4),(5,6,7)]),
+    'folded-edge-x-plane': ([(0,0,0),(0,2,0),(0,0,2),(0,1,1)], [(0,1,2),(1,0,3)]),
+    'folded-edge-y-plane': ([(0,0,0),(2,0,0),(0,0,2),(1,0,1)], [(0,1,2),(1,0,3)]),
+    'non-manifold': ([(0,0,0),(2,0,0),(0,2,0),(0,-2,0),(0,0,2)],
+                     [(0,1,2),(1,0,3),(0,1,4)]),
+}
+for name, (points, faces) in cases.items():
+    report = inspect(name, points, faces)
+    results[name] = {'crossings': report['selfIntersectionCount'],
+                     'nonManifold': report['nonManifoldEdges']}
+''')
+        self.assertEqual(results['point-contact']['crossings'], 0)
+        self.assertEqual(results['near-coplanar-edge-contact']['crossings'], 0)
+        self.assertEqual(results['parallel-gap']['crossings'], 0)
+        for name in ('point-crossing', 'coplanar-point-overlap', 'coplanar-disconnected-overlap',
+                     'folded-edge', 'duplicate-face', 'small-crossing-large-envelope',
+                     'folded-edge-x-plane', 'folded-edge-y-plane'):
+            with self.subTest(name=name):
+                self.assertEqual(results[name]['crossings'], 1, results[name])
+        self.assertEqual(results['non-manifold']['nonManifold'], 1)
+
+
 if __name__ == '__main__':
     unittest.main()

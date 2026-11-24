@@ -8,9 +8,9 @@
   },
   "notFor": {"observations": {"roomCount": [">1"]}},
   "costClass": "heavy",
-  "deps": [{"probe": "blender>=4.3"}],
+  "deps": [{"probe": "interior-bpy>=4.3"}],
   "display": {
     "appliesTo": "One enclosed room authored as metric Blender geometry with PBR, bake/probe, runtime GLB and an independently measured composition handoff. Separately routed exact component identities are removed before native authoring is saved or baked.",
-    "notFor": "Multiple rooms, open environments, standalone objects, rigging, explicit 2D, or unknown room count. This pinned 0.3.1 adapter does not include the unreleased 0.4 house/schema-3 pipeline. Artifact production is not visual or gate acceptance."
+    "notFor": "Multiple rooms, open environments, standalone objects, rigging, explicit 2D, or unknown room count. This 0.3.2 adapter does not include the unreleased 0.4 house/schema-3 pipeline. Artifact production is not visual or gate acceptance."
   }
 }

@@ -8,6 +8,13 @@
 - Workspace-local pinned npm dependencies and a real WebGL browser for the viewer/validator. See [production setup and commands](production-runbook.md); a harness install does not silently install bpy, image packages or a web app. Compatible Blender wheels must exist for your platform.
 - Version 0.3.0 uses the [img2 Interior Free Use, Restricted Commercialization License 1.0](../LICENSE): use and modification are free, including commercial project work and output delivery; selling/bundling the tool or offering paid hosted/API access to its workflow requires prior written permission. The output exception permits viewer/runtime code with deliverables. [Component notices](../THIRD_PARTY_NOTICES.md) preserve separately licensed portions and earlier grants.
 
+The unreleased 0.3.2 route card requires `interior-bpy>=4.3`, not a `blender`
+executable. The trusted host must probe and invoke the same `IMG2_BLENDER_PYTHON`
+used by `author_scene.py` and `inspect_routed_artifact.py`, preserving its venv
+path. Core discovery and completion authority must implement this probe before
+bpy-only routed use is qualified; older cores fail interior eligibility closed.
+An unavailable interior runtime must not invalidate unrelated route candidates.
+
 ## Public npm install (preferred)
 
 Install `@img2threejs/img2interior@0.3.1` from the public npm registry into a dedicated, persistent prefix, then register it with the official img2 harness via `add --link`. `npm install` is the real distribution and tracking event; `add --link` is the host registration step. The package has no lifecycle scripts, so `npm install` performs only a fetch and a directory copy. Neither step requires Git credentials or an authenticated npm session — the package is in the default-public `@img2threejs` scope.
