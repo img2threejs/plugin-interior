@@ -20,7 +20,7 @@ jobs:
           node-version: '20'
       - name: Install optional image-tool dependencies
         run: python3 -m pip install -r requirements-surfaces.txt
-      - name: Run behavior regressions
+      - name: Run behavior regressions (native coverage is required separately)
         env:
           IMG2_HARNESS_SOURCE: ${{ github.workspace }}/.harness-sdk
         run: python3 -m unittest discover -s tests -v
@@ -35,3 +35,39 @@ jobs:
         run: python3 scripts/verify_install.py --harness-source .harness-sdk
       - name: Build deterministic source release
         run: python3 scripts/package_plugin.py
+  native-required:
+    name: Required native Blender 4.3 validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMG2_HARNESS_SOURCE: ${{ github.workspace }}/.harness-sdk
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: img2threejs/img2
+          ref: 95c722b524118eb6dde74c1f47bff7dd1c18aef3
+          path: .harness-sdk
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Provision isolated pinned native runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libx11-6 libxi6 libxrender1 libxxf86vm1
+          native_python="$RUNNER_TEMP/interior-native/bin/python"
+          python3 -m venv "$RUNNER_TEMP/interior-native"
+          "$native_python" -m pip install -r requirements-authoring.txt
+          "$native_python" -I -B -c 'import sys,bpy,numpy; assert sys.version_info[:2] == (3,11); assert bpy.app.version == (4,3,0); assert numpy.__version__ == "1.26.4"; print(sys.version, bpy.app.version_string, numpy.__version__)'
+          echo "IMG2_BLENDER_PYTHON=$native_python" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install separate driver image dependencies
+        run: python3 -m pip install -r requirements-surfaces.txt
+      - name: Require native-enabled full discovery with no skipped evidence
+        run: python3 scripts/require_native_tests.py

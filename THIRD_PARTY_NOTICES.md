@@ -14,8 +14,10 @@ The following repository-relative paths remain under Apache License, Version 2.0
 - `tools/audit_routed_artifact.py`
 - `tools/inspect_routed_artifact.py`
 - `tools/interior_adapter.py`
+- `scripts/require_native_tests.py`
 - `tests/test_authoring.py`
 - `tests/test_distribution.py`
+- `tests/test_required_native.py`
 - `tests/test_routed_audit.py`
 - `tests/test_routed_quality.py`
 - `tests/test_routing.py`

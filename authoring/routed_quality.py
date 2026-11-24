@@ -38,9 +38,33 @@ def _distances(triangle, other, normal):
     return [_dot(_subtract(point, other[0]), normal) for point in triangle]
 
 
-def _coplanar(a, b, normal_a, normal_b):
-    return (max(abs(value) for value in _distances(a, b, normal_b)) <= _PLANE_ROUNDOFF
-            and max(abs(value) for value in _distances(b, a, normal_a)) <= _PLANE_ROUNDOFF)
+def _coplanar(a, b, errors_a, errors_b):
+    """Bound orient3d error from the source float32 coordinate intervals.
+
+    This is input uncertainty, not extra geometric contact allowance. In
+    particular a tiny nonzero Z value has a tiny ULP, unlike a tilted XYZ point.
+    """
+    def contains(triangle, points, errors, point_errors):
+        u, v = _subtract(triangle[1], triangle[0]), _subtract(triangle[2], triangle[0])
+        eu = tuple(x + y for x, y in zip(errors[1], errors[0]))
+        ev = tuple(x + y for x, y in zip(errors[2], errors[0]))
+        normal = _cross(u, v)
+        cross_error = []
+        for axis in range(3):
+            j, k = (axis + 1) % 3, (axis + 2) % 3
+            cross_error.append(abs(u[j]) * ev[k] + abs(v[k]) * eu[j] + eu[j] * ev[k]
+                               + abs(u[k]) * ev[j] + abs(v[j]) * eu[k] + eu[k] * ev[j])
+        for point, error in zip(points, point_errors):
+            w = _subtract(point, triangle[0])
+            ew = tuple(x + y for x, y in zip(error, errors[0]))
+            bound = sum(abs(n) * e + ne * (abs(value) + e)
+                        for n, ne, value, e in zip(normal, cross_error, w, ew))
+            bound += math.hypot(*normal) * _PLANE_ROUNDOFF
+            if abs(_dot(normal, w)) > bound:
+                return False
+        return True
+
+    return contains(a, b, errors_a, errors_b) and contains(b, a, errors_b, errors_a)
 
 
 def _coplanar_area(a, b, normal):
@@ -72,19 +96,26 @@ def _coplanar_area(a, b, normal):
                          for a, b in zip(relative, relative[1:] + relative[:1]))) / 2
 
 
-def _interiors_cross(a, b, normal_a, normal_b):
+def _interiors_cross(a, b, normal_a, normal_b, errors_a, errors_b):
     if normal_a is None or normal_b is None:
         return False  # Degeneracy is reported separately and fails the gate.
     # Preserve the original per-triangle relative contact policy, but apply it in
     # Python double precision only after the welded BVH has found candidates.
-    def inset(triangle):
+    def inset(triangle, errors):
         center = tuple(sum(point[axis] for point in triangle) / 3 for axis in range(3))
-        return tuple(tuple(c + (v - c) * (1 - CONTACT_TOLERANCE) for c, v in zip(center, point))
-                     for point in triangle)
+        mean_error = tuple(sum(point[axis] for point in errors) / 3 for axis in range(3))
+        points = tuple(tuple(c + (v - c) * (1 - CONTACT_TOLERANCE) for c, v in zip(center, point))
+                       for point in triangle)
+        uncertainty = tuple(tuple(e * (1 - CONTACT_TOLERANCE) + c * CONTACT_TOLERANCE
+                                  for e, c in zip(error, mean_error)) for error in errors)
+        return points, uncertainty
 
-    a, b = inset(a), inset(b)
-    if _coplanar(a, b, normal_a, normal_b):
-        return _coplanar_area(a, b, normal_a) > _PLANE_ROUNDOFF ** 2
+    a, errors_a = inset(a, errors_a)
+    b, errors_b = inset(b, errors_b)
+    if (_coplanar(a, b, errors_a, errors_b)
+            and _coplanar_area(a, b, normal_a) > _PLANE_ROUNDOFF ** 2):
+        return True
+    # An uncertain coplanar classification must never hide a genuine 3D crossing.
     distances_a, distances_b = _distances(a, b, normal_b), _distances(b, a, normal_a)
     # Both interiors must straddle the other plane: touching along a shared edge
     # or only at one vertex is not a crossing, even when BVH float32 math drifts.
@@ -113,24 +144,48 @@ def _interiors_cross(a, b, normal_a, normal_b):
     return min(end_a, end_b) - max(start_a, start_b) > _PLANE_ROUNDOFF
 
 
-def _coplanar_pairs(triangles, normals, axis):
-    """Supplement BVH's coplanar/shared-edge exclusions with an AABB sweep."""
-    boxes = [(tuple(min(point[a] for point in triangle) for a in range(3)),
-              tuple(max(point[a] for point in triangle) for a in range(3))) for triangle in triangles]
-    other_axes = tuple(a for a in range(3) if a != axis)
-    active = []
-    for index in sorted(range(len(boxes)), key=lambda index: boxes[index][0][axis]):
-        low, high = boxes[index]
-        active = [other for other in active if boxes[other][1][axis] >= low[axis]]
-        for other in active:
-            normal_a, normal_b = normals[other], normals[index]
-            if (any(boxes[other][1][a] < low[a] or high[a] < boxes[other][0][a] for a in other_axes)
-                    or normal_a is None or normal_b is None
-                    or abs(_dot(normal_a, normal_b)) < 1 - _PLANE_ROUNDOFF):
-                continue
-            if _coplanar(triangles[other], triangles[index], normal_a, normal_b):
-                yield tuple(sorted((other, index)))
-        active.append(index)
+def _candidate_pairs(points, faces, geometry, normals, areas):
+    """Compiled BVH broad phase, including otherwise invisible coplanar pairs.
+
+    Each face gets two auxiliary tents with its inset triangle as base. A
+    coplanar overlap intersects a tent side of at least one face (containment
+    included). Original faces keep welded indices for ordinary 3D crossings.
+    Tents only generate candidates; predicates always inspect the source faces.
+    """
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    valid = np.flatnonzero(areas > 0)
+    triangles = geometry[valid]
+    centers = triangles.mean(axis=1)
+    height = np.maximum(np.linalg.norm(triangles[:, 1:] - triangles[:, :1], axis=2).max(axis=1),
+                        np.linalg.norm(triangles[:, 2] - triangles[:, 1], axis=1))
+    peaks = np.stack((centers + normals[valid] * height[:, None],
+                      centers - normals[valid] * height[:, None]), axis=1)
+    bases = centers[:, None, :] + (triangles - centers[:, None, :]) * (1 - CONTACT_TOLERANCE)
+    base_ids = len(points) + np.arange(len(valid) * 3).reshape(-1, 3)
+    peak_ids = len(points) + bases.size // 3 + np.arange(len(valid) * 2).reshape(-1, 2)
+    sides = np.empty((len(valid), 2, 3, 3), dtype=np.int64)
+    sides[:, :, :, 0] = base_ids[:, None, :]
+    sides[:, :, :, 1] = np.roll(base_ids, -1, axis=1)[:, None, :]
+    sides[:, :, :, 2] = peak_ids[:, :, None]
+    owners = np.concatenate((np.arange(len(faces)), np.repeat(valid, 6)))
+    tree = BVHTree.FromPolygons(np.concatenate((points, bases.reshape(-1, 3), peaks.reshape(-1, 3))),
+                               np.concatenate((faces, sides.reshape(-1, 3))),
+                               all_triangles=True, epsilon=0.0)
+    pairs = set()
+    for a, b in tree.overlap(tree):
+        if (a < len(faces) or b < len(faces)) and owners[a] != owners[b]:
+            pairs.add(tuple(sorted((int(owners[a]), int(owners[b])))))
+    # BVH excludes identical indexed faces; duplicates are genuine overlaps.
+    _, inverse, counts = np.unique(np.sort(faces, axis=1), axis=0, return_inverse=True, return_counts=True)
+    if np.any(counts > 1):
+        order = np.argsort(inverse, kind='stable')
+        starts = np.concatenate(([0], np.cumsum(counts)))
+        for group in np.flatnonzero(counts > 1):
+            ids = order[starts[group]:starts[group + 1]]
+            for index, a in enumerate(ids):
+                pairs.update(tuple(sorted((int(a), int(b)))) for b in ids[index + 1:])
+    return pairs
 
 
 def inventory_coverage(rows, admitted, excluded):
@@ -143,55 +198,66 @@ def inventory_coverage(rows, admitted, excluded):
 
 
 def mesh_integrity(obj):
-    """Inspect every actual triangle, welding only exactly equal imported vertices.
+    """Inspect actual triangle interiors without world-transform float32 drift.
 
-    A welded BVH finds noncoplanar candidates without losing shared topology.
-    Double-precision interior predicates reject boundary-only contact; a coplanar
-    sweep retains fold/duplicate/overlap detection that BVH itself excludes.
-    Geometry is normalized before predicates, keeping the declared relative
-    tolerance independent of the mesh's world translation or scale.
+    Invertible affine transforms preserve intersection and centroid insetting, so
+    predicates use source-local coordinates. Physical degeneracy still uses
+    world geometry. Singular transforms are measured in world space instead.
     """
-    from mathutils.bvhtree import BVHTree
+    import numpy as np
     mesh = obj.data
     mesh.calc_loop_triangles()
-    vertices = [tuple(obj.matrix_world @ vertex.co) for vertex in mesh.vertices]
-    if not vertices or any(not math.isfinite(v) for point in vertices for v in point):
+    source = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+    mesh.vertices.foreach_get('co', source)
+    source = source.reshape(-1, 3)
+    matrix = np.asarray(obj.matrix_world, dtype=np.float64)
+    world = source.astype(np.float64) @ matrix[:3, :3].T + matrix[:3, 3]
+    if not len(source) or not np.isfinite(world).all():
         raise ValueError('Missing or nonfinite delivered geometry: ' + obj.name)
-    triangles = [tuple(face.vertices) for face in mesh.loop_triangles]
-    if not triangles:
+    indices = np.empty(len(mesh.loop_triangles) * 3, dtype=np.int32)
+    mesh.loop_triangles.foreach_get('vertices', indices)
+    indices = indices.reshape(-1, 3)
+    if not len(indices):
         raise ValueError('Delivered mesh has no physical triangles: ' + obj.name)
-    box = bounds([{'bounds': [list(point) for point in vertices]}])
-    axis = max(range(3), key=lambda a: box['max'][a] - box['min'][a])
-    span = box['max'][axis] - box['min'][axis]
-    if span <= 0:
+    world_span = np.ptp(world, axis=0).max()
+    if world_span <= 0:
         raise ValueError('Delivered mesh has zero extent: ' + obj.name)
-    welded, identities = {}, []
-    for point in vertices:
-        identities.append(welded.setdefault(point, len(welded)))
-    points = [tuple((point[a] - box['min'][a]) / span for a in range(3)) for point in welded]
-    faces = [tuple(identities[index] for index in triangle) for triangle in triangles]
-    geometry, normals, edges = [], [], {}
-    degenerate = 0
-    for face in faces:
-        triangle = tuple(points[index] for index in face)
-        normal = _cross(_subtract(triangle[1], triangle[0]), _subtract(triangle[2], triangle[0]))
-        area = math.hypot(*normal)
-        if area <= CONTACT_TOLERANCE ** 2:
-            degenerate += 1
-        geometry.append(triangle)
-        normals.append(tuple(value / area for value in normal) if area else None)
-        for x, y in zip(face, face[1:] + face[:1]):
-            key = tuple(sorted((x, y)))
-            edges[key] = edges.get(key, 0) + 1
-    tree = BVHTree.FromPolygons(points, faces, all_triangles=True, epsilon=0.0)
-    candidates = {tuple(sorted((a, b))) for a, b in tree.overlap(tree) if a != b}
-    candidates.update(_coplanar_pairs(geometry, normals, axis))
-    intersections = sorted((a, b) for a, b in candidates
-                           if _interiors_cross(geometry[a], geometry[b], normals[a], normals[b]))
+    world_triangles = (world[indices] - world.min(axis=0)) / world_span
+    world_area = np.linalg.norm(np.cross(world_triangles[:, 1] - world_triangles[:, 0],
+                                         world_triangles[:, 2] - world_triangles[:, 0]), axis=1)
+    # Half a float32 ULP per stored coordinate; do not replace this with a larger
+    # mesh-wide epsilon, which confuses true small gaps with rounding uncertainty.
+    uncertainty = np.abs(np.spacing(source)).astype(np.float64) / 2
+    if np.linalg.det(matrix[:3, :3]) == 0:
+        coordinates = world
+        uncertainty = uncertainty @ np.abs(matrix[:3, :3]).T
+    else:
+        coordinates = source.astype(np.float64)
+    low, high = coordinates.min(axis=0), coordinates.max(axis=0)
+    span = (high - low).max()
+    coordinates = (coordinates - (low + high) / 2) / span
+    uncertainty /= span
+    points, identities = np.unique(coordinates, axis=0, return_inverse=True)
+    errors = np.zeros_like(points)
+    np.maximum.at(errors, identities, uncertainty)
+    faces = identities[indices]
+    geometry, triangle_errors = points[faces], errors[faces]
+    raw_normals = np.cross(geometry[:, 1] - geometry[:, 0], geometry[:, 2] - geometry[:, 0])
+    areas = np.linalg.norm(raw_normals, axis=1)
+    normals = np.divide(raw_normals, areas[:, None], out=np.zeros_like(raw_normals), where=areas[:, None] != 0)
+    edges = np.concatenate((faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]))
+    _, edge_counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
+    intersections = []
+    for a, b in sorted(_candidate_pairs(points, faces, geometry, normals, areas)):
+        if _interiors_cross(geometry[a].tolist(), geometry[b].tolist(),
+                            normals[a].tolist() if areas[a] else None,
+                            normals[b].tolist() if areas[b] else None,
+                            triangle_errors[a].tolist(), triangle_errors[b].tolist()):
+            intersections.append((a, b))
     return {'name': obj.get('physical_id', obj.name), 'component': obj['component'],
-            'triangles': len(triangles), 'degenerateTriangles': degenerate,
-            'boundaryEdges': sum(count == 1 for count in edges.values()),
-            'nonManifoldEdges': sum(count > 2 for count in edges.values()),
+            'triangles': len(faces), 'degenerateTriangles': int(np.count_nonzero(world_area <= CONTACT_TOLERANCE ** 2)),
+            'boundaryEdges': int(np.count_nonzero(edge_counts == 1)),
+            'nonManifoldEdges': int(np.count_nonzero(edge_counts > 2)),
             'selfIntersectionCount': len(intersections),
             'intersectionPairs': [list(pair) for pair in intersections],
             'contactToleranceRelative': CONTACT_TOLERANCE,

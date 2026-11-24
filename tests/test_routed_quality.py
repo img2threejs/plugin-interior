@@ -163,5 +163,104 @@ for name, (points, faces) in cases.items():
         self.assertEqual(results['non-manifold']['nonManifold'], 1)
 
 
+    def test_tilted_coplanar_folds_and_disconnected_overlap_are_rejected(self):
+        results = self.geometry_results(r'''
+import math
+from mathutils import Euler, Matrix
+rotation = Euler(tuple(math.radians(value) for value in (31, 47, 13))).to_matrix()
+cases = {
+    'fold': ([(0,0,0),(2,0,0),(0,2,0),(1,1,0)], [(0,1,2),(1,0,3)], 1),
+    'shared-vertex': ([(0,0,0),(2,0,0),(0,2,0),(1,0.2,0),(0.2,1,0)],
+                       [(0,1,2),(0,3,4)], 1),
+    'disconnected': ([(0,0,0),(2,0,0),(0,2,0),(0.2,0.2,0),(1.5,0.2,0),(0.2,1.5,0)],
+                      [(0,1,2),(3,4,5)], 1),
+    'adjacent': ([(0,0,0),(2,0,0),(0,2,0),(2,2,0)], [(0,1,2),(1,3,2)], 0),
+    'crossing': ([(-1,-1,0),(1,-1,0),(0,1,0),(0,-0.5,-1),(0,-0.5,1),(0,0.5,0)],
+                  [(0,1,2),(3,4,5)], 1),
+    'parallel-gap': ([(0,0,0),(2,0,0),(0,2,0),(0,0,0.00001),(2,0,0.00001),(0,2,0.00001)],
+                      [(0,1,2),(3,4,5)], 0),
+}
+results = []
+for mode in ('object-transform', 'baked-float32'):
+    for scale in ((1,1,1), (3,0.02,1.1)):
+        transform = rotation @ Matrix.Diagonal(scale)
+        for name, (points, faces, expected) in cases.items():
+            translation = (3,1,2) if name == 'disconnected' else (3.1,1.7,0.9)
+            if mode == 'baked-float32':
+                points = [tuple(sum(float(transform[a][b]) * point[b] for b in range(3))
+                                + translation[a] for a in range(3)) for point in points]
+            mesh = bpy.data.meshes.new(name)
+            mesh.from_pydata(points, [], faces)
+            mesh.update()
+            obj = bpy.data.objects.new(name, mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            obj['component'] = 'shell'
+            if mode == 'object-transform':
+                obj.rotation_euler = tuple(math.radians(value) for value in (31,47,13))
+                obj.scale = scale
+                obj.location = translation
+            bpy.context.view_layer.update()
+            report = mesh_integrity(obj)
+            results.append({'case': name, 'mode': mode, 'scale': scale,
+                            'expected': expected, 'crossings': report['selfIntersectionCount']})
+            bpy.data.objects.remove(obj, do_unlink=True)
+# Independently authored tilted data, not a transformed axis-aligned fixture.
+a, b, c = (0.3,0.1,0.6), (1.1,-0.4,0.3), (0.2,0.9,-0.1)
+d = tuple((x+y)/2 * 0.75 + z * 0.25 for x,y,z in zip(a,b,c))
+report = inspect('tilted-authored-fold', [a,b,c,d], [(0,1,2),(1,0,3)])
+results.append({'case': 'tilted-authored-fold', 'crossings': report['selfIntersectionCount'], 'expected': 1})
+''')
+        for row in results:
+            with self.subTest(row=row):
+                self.assertEqual(row['crossings'], row['expected'], row)
+
+
+    def test_large_planar_grid_and_radial_fan_remain_valid(self):
+        results = self.geometry_results(r'''
+import math
+results = []
+count = 4096
+points = [(0,0,0)] + [(math.cos(2*math.pi*i/count), math.sin(2*math.pi*i/count), 0)
+                      for i in range(count)]
+report = inspect('radial-fan', points, [(0, i+1, (i+1)%count+1) for i in range(count)])
+results.append({'expectedTriangles': count, 'expectedBoundary': count, 'report': report})
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=200, y_subdivisions=200, size=6)
+obj = bpy.context.object
+obj['component'] = 'shell'
+bpy.context.view_layer.update()
+results.append({'expectedTriangles': 80000, 'expectedBoundary': 800, 'report': mesh_integrity(obj)})
+''')
+        for row in results:
+            with self.subTest(name=row['report']['name']):
+                report = row['report']
+                self.assertEqual(report['triangles'], row['expectedTriangles'])
+                self.assertEqual(report['boundaryEdges'], row['expectedBoundary'])
+                self.assertEqual(report['selfIntersectionCount'], 0)
+                self.assertEqual(report['degenerateTriangles'], 0)
+                self.assertEqual(report['nonManifoldEdges'], 0)
+
+    def test_singular_transform_uses_actual_world_geometry(self):
+        results = self.geometry_results(r'''
+results = {}
+for name, points, faces in (
+    ('collapsed-overlap', [(0,0,0),(2,0,0),(0,2,0),(0,0,1),(2,0,1),(0,2,1)],
+                          [(0,1,2),(3,4,5)]),
+    ('flat-floor', [(0,0,0),(2,0,0),(0,2,0)], [(0,1,2)]),
+):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(points, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj['component'] = 'shell'
+    obj.scale.z = 0
+    bpy.context.view_layer.update()
+    results[name] = mesh_integrity(obj)
+''')
+        self.assertEqual(results['collapsed-overlap']['selfIntersectionCount'], 1)
+        self.assertEqual(results['flat-floor']['selfIntersectionCount'], 0)
+        self.assertEqual(results['flat-floor']['degenerateTriangles'], 0)
+
+
 if __name__ == '__main__':
     unittest.main()

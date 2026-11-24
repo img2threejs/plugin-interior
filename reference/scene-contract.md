@@ -76,10 +76,14 @@ Its `evidence` explicitly records `artifactSha256`, `referenceSha256`,
 `viewSetSha256`. The last hashes canonical JSON `{captures,setup}` using sorted
 keys and compact separators, binding actual persisted PNG hashes and camera poses.
 
-Exactly coincident vertices retain shared indices in the BVH. Normalized
-double-precision predicates exclude edge/vertex-only contact at relative `1e-6`;
-coplanar clipping also detects folded and duplicate faces that BVH alone omits.
-The result reports that tolerance and all intersecting triangle pairs. This is
+Exactly coincident vertices retain shared indices in the BVH. Source-local
+predicates preserve affine intersection and the unchanged per-face relative
+`1e-6` inset; singular transforms are measured in world space. Coplanarity uses
+stored float32 coordinate-ULP error bounds, not a mesh-wide contact allowance.
+Auxiliary BVH tents generate coplanar candidates without a Python all-pairs
+sweep; only actual source-face interiors determine crossings. Folded and
+duplicate faces remain failures, and uncertain coplanarity cannot suppress a
+genuine 3D crossing. The result reports the tolerance and all pairs. This is
 an all-triangle intra-mesh check, not inter-object penetration or mathematical
 exactness below that tolerance. Opaque emission masks establish geometry
 silhouette, not PBR appearance or source-camera fidelity.

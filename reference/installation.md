@@ -15,6 +15,14 @@ path. Core discovery and completion authority must implement this probe before
 bpy-only routed use is qualified; older cores fail interior eligibility closed.
 An unavailable interior runtime must not invalidate unrelated route candidates.
 
+CI's separate **Required native Blender 4.3 validation** job provisions the pinned
+Python 3.11/bpy 4.3.0/NumPy 1.26.4 venv, then runs full discovery through
+`python3 scripts/require_native_tests.py` with that `IMG2_BLENDER_PYTHON`.
+Missing selector, failed tests, empty discovery or any skipped evidence fails
+that job. Minimal stdlib/image discovery remains separate and reports native
+skips; its success is not native qualification. Branch-protection settings are
+managed by the repository owner, not by this workflow.
+
 ## Public npm install (preferred)
 
 Install `@img2threejs/img2interior@0.3.1` from the public npm registry into a dedicated, persistent prefix, then register it with the official img2 harness via `add --link`. `npm install` is the real distribution and tracking event; `add --link` is the host registration step. The package has no lifecycle scripts, so `npm install` performs only a fetch and a directory copy. Neither step requires Git credentials or an authenticated npm session — the package is in the default-public `@img2threejs` scope.
