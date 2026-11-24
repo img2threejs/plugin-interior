@@ -150,7 +150,8 @@ def _candidate_pairs(points, faces, geometry, normals, areas):
     Each face gets two auxiliary tents with its inset triangle as base. A
     coplanar overlap intersects a tent side of at least one face (containment
     included). Original faces keep welded indices for ordinary 3D crossings.
-    Tents only generate candidates; predicates always inspect the source faces.
+    Separate trees never query auxiliary against auxiliary: those irrelevant
+    overlaps can be quadratic on dense rods. Predicates inspect source faces.
     """
     import numpy as np
     from mathutils.bvhtree import BVHTree
@@ -162,20 +163,20 @@ def _candidate_pairs(points, faces, geometry, normals, areas):
     peaks = np.stack((centers + normals[valid] * height[:, None],
                       centers - normals[valid] * height[:, None]), axis=1)
     bases = centers[:, None, :] + (triangles - centers[:, None, :]) * (1 - CONTACT_TOLERANCE)
-    base_ids = len(points) + np.arange(len(valid) * 3).reshape(-1, 3)
-    peak_ids = len(points) + bases.size // 3 + np.arange(len(valid) * 2).reshape(-1, 2)
+    base_ids = np.arange(len(valid) * 3).reshape(-1, 3)
+    peak_ids = bases.size // 3 + np.arange(len(valid) * 2).reshape(-1, 2)
     sides = np.empty((len(valid), 2, 3, 3), dtype=np.int64)
     sides[:, :, :, 0] = base_ids[:, None, :]
     sides[:, :, :, 1] = np.roll(base_ids, -1, axis=1)[:, None, :]
     sides[:, :, :, 2] = peak_ids[:, :, None]
-    owners = np.concatenate((np.arange(len(faces)), np.repeat(valid, 6)))
-    tree = BVHTree.FromPolygons(np.concatenate((points, bases.reshape(-1, 3), peaks.reshape(-1, 3))),
-                               np.concatenate((faces, sides.reshape(-1, 3))),
-                               all_triangles=True, epsilon=0.0)
-    pairs = set()
-    for a, b in tree.overlap(tree):
-        if (a < len(faces) or b < len(faces)) and owners[a] != owners[b]:
-            pairs.add(tuple(sorted((int(owners[a]), int(owners[b])))))
+    originals = BVHTree.FromPolygons(points, faces, all_triangles=True, epsilon=0.0)
+    tents = BVHTree.FromPolygons(np.concatenate((bases.reshape(-1, 3), peaks.reshape(-1, 3))),
+                                sides.reshape(-1, 3), all_triangles=True, epsilon=0.0)
+    pairs = {tuple(sorted((a, b))) for a, b in originals.overlap(originals) if a != b}
+    for a, side in originals.overlap(tents):
+        b = int(valid[side // 6])
+        if a != b:
+            pairs.add(tuple(sorted((a, b))))
     # BVH excludes identical indexed faces; duplicates are genuine overlaps.
     _, inverse, counts = np.unique(np.sort(faces, axis=1), axis=0, return_inverse=True, return_counts=True)
     if np.any(counts > 1):

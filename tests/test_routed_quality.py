@@ -239,6 +239,79 @@ results.append({'expectedTriangles': 80000, 'expectedBoundary': 800, 'report': m
                 self.assertEqual(report['degenerateTriangles'], 0)
                 self.assertEqual(report['nonManifoldEdges'], 0)
 
+    def test_dense_thin_rods_bound_broadphase_work_and_keep_real_crossings(self):
+        results = self.geometry_results(r'''
+import math
+import mathutils.bvhtree as native_bvh
+actual_bvh = native_bvh.BVHTree
+overlap_results = 0
+# Profile actual native output, without replacing geometry or filtering results.
+class MeasuredTree:
+    def __init__(self, tree):
+        self.tree = tree
+    def overlap(self, other):
+        global overlap_results
+        pairs = self.tree.overlap(other.tree)
+        overlap_results += len(pairs)
+        return pairs
+class MeasuredBVH:
+    @staticmethod
+    def FromPolygons(*args, **kwargs):
+        return MeasuredTree(actual_bvh.FromPolygons(*args, **kwargs))
+native_bvh.BVHTree = MeasuredBVH
+count = 1024
+bpy.ops.mesh.primitive_cylinder_add(vertices=count, radius=0.02, depth=2,
+    end_fill_type='NOTHING', location=(3,1,1),
+    rotation=tuple(math.radians(v) for v in (31,47,13)))
+obj = bpy.context.object
+obj['component'] = 'shell'
+bpy.context.view_layer.update()
+report = mesh_integrity(obj)
+results = [{'pierced': False, 'report': report, 'overlapResults': overlap_results}]
+points = [tuple(vertex.co) for vertex in obj.data.vertices]
+faces = [tuple(face.vertices) for face in obj.data.polygons]
+start = len(points)
+points.extend(((0,0.003,-0.5), (0.03,0.003,0), (0,0.003,0.5)))
+faces.append((start, start+1, start+2))
+overlap_results = 0
+report = inspect('pierced-thin-rod', points, faces)
+results.append({'pierced': True, 'report': report, 'overlapResults': overlap_results})
+native_bvh.BVHTree = actual_bvh
+''')
+        for row in results:
+            with self.subTest(pierced=row['pierced']):
+                report = row['report']
+                self.assertEqual(report['degenerateTriangles'], 0)
+                self.assertEqual(report['nonManifoldEdges'], 0)
+                self.assertEqual(report['triangles'], 2048 + int(row['pierced']))
+                if row['pierced']:
+                    self.assertEqual(report['selfIntersectionCount'], 2)
+                else:
+                    self.assertEqual(report['selfIntersectionCount'], 0)
+                    self.assertEqual(report['boundaryEdges'], 2048)
+                # Bound materialized broadphase work, not machine-dependent time.
+                self.assertLessEqual(row['overlapResults'], 32 * report['triangles'], row)
+
+    def test_near_singular_transform_preserves_resolvable_source_gaps(self):
+        results = self.geometry_results(r'''
+results = []
+for scale, expected in ((1e-9, 0), (1e-12, 0), (0, 1)):
+    mesh = bpy.data.meshes.new('near-singular-gap')
+    mesh.from_pydata([(0,0,0),(2,0,0),(0,2,0),(0,0,1),(2,0,1),(0,2,1)],
+                     [], [(0,1,2),(3,4,5)])
+    mesh.update()
+    obj = bpy.data.objects.new('near-singular-gap', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj['component'] = 'shell'
+    obj.scale.z = scale
+    bpy.context.view_layer.update()
+    results.append({'scale': scale, 'expected': expected, 'report': mesh_integrity(obj)})
+''')
+        for row in results:
+            with self.subTest(scale=row['scale']):
+                self.assertEqual(row['report']['selfIntersectionCount'], row['expected'])
+                self.assertEqual(row['report']['degenerateTriangles'], 0)
+
     def test_singular_transform_uses_actual_world_geometry(self):
         results = self.geometry_results(r'''
 results = {}

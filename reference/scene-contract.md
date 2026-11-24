@@ -80,13 +80,18 @@ Exactly coincident vertices retain shared indices in the BVH. Source-local
 predicates preserve affine intersection and the unchanged per-face relative
 `1e-6` inset; singular transforms are measured in world space. Coplanarity uses
 stored float32 coordinate-ULP error bounds, not a mesh-wide contact allowance.
-Auxiliary BVH tents generate coplanar candidates without a Python all-pairs
-sweep; only actual source-face interiors determine crossings. Folded and
+Separate original/auxiliary BVHs generate coplanar candidates without a Python
+all-pairs sweep or auxiliary-to-auxiliary queries; only source-face interiors
+determine crossings. Folded and
 duplicate faces remain failures, and uncertain coplanarity cannot suppress a
 genuine 3D crossing. The result reports the tolerance and all pairs. This is
 an all-triangle intra-mesh check, not inter-object penetration or mathematical
 exactness below that tolerance. Opaque emission masks establish geometry
 silhouette, not PBR appearance or source-camera fidelity.
+Float32 input uncertainty can conservatively reject parallel gaps below the
+stored coordinate spacing, especially far from the source origin. Author local
+coordinates near their origin before float32 storage to retain precision; this
+neither enlarges the contact allowance nor recovers already lost geometry.
 
 Component inventory uses exact tags and actual imported geometry. It cannot
 recognize whether a mesh depicts a required real reference part:
