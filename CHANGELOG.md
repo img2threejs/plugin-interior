@@ -2,6 +2,7 @@
 
 ## 0.3.2 — unreleased
 
+- Pin both CI jobs to the published img2 0.6.0 installed-interface probe and SDK, rather than the earlier setup candidate; no runtime or quality gate is relaxed.
 - Give the routed adapter a distinct source/package/skill version rather than reusing published 0.3.1; no release tag or publication is implied.
 - Include the routed tools and regression tests in the scoped Apache-2.0 component notices; retain the repository's mixed-license boundary.
 - Weld shared triangle positions before BVH queries and use normalized double-precision contact predicates plus coplanar clipping. Preserve real crossings, folds, duplicate faces, degeneracy and topology counts without increasing the `1e-6` relative contact tolerance.

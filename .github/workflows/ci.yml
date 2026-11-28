@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: img2threejs/img2
-          ref: 95c722b524118eb6dde74c1f47bff7dd1c18aef3
+          ref: debc99d86a1300e13781f14cb0d7c16b8c2750e1
           path: .harness-sdk
       - uses: actions/setup-python@v5
         with:
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: img2threejs/img2
-          ref: 95c722b524118eb6dde74c1f47bff7dd1c18aef3
+          ref: debc99d86a1300e13781f14cb0d7c16b8c2750e1
           path: .harness-sdk
       - uses: actions/setup-python@v5
         with:
