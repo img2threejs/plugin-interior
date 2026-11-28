@@ -11,7 +11,16 @@ The following repository-relative paths remain under Apache License, Version 2.0
 - `examples/` and all its contents
 - `tools/author_scene.py`
 - `tools/inspect_scene.py`
+- `tools/audit_routed_artifact.py`
+- `tools/inspect_routed_artifact.py`
+- `tools/interior_adapter.py`
+- `scripts/require_native_tests.py`
 - `tests/test_authoring.py`
+- `tests/test_distribution.py`
+- `tests/test_required_native.py`
+- `tests/test_routed_audit.py`
+- `tests/test_routed_quality.py`
+- `tests/test_routing.py`
 - `requirements-authoring.txt`
 
 Their retained copyright notice is **Copyright 2026 hoainho**. The complete license and copyright notice are in [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt). Preserve the license and applicable notices when redistributing these portions. The primary license does not limit the rights granted for these components, including commercial use and redistribution under Apache-2.0.

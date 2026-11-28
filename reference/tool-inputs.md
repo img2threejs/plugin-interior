@@ -13,12 +13,15 @@ All JSON uses UTF-8. Paths on commands are explicit local files; no tool uploads
   "authorization": "Actual permission and scope, reviewed by the project owner",
   "scale": {"unit":"m","basis":"authored-estimate","note":"Single-image scale and unseen depth are authored"},
   "components": ["room-shell","sofa","glazing"],
+  "excludeComponents": ["sofa"],
   "unknowns": ["Unseen construction is not measured"],
   "interactionRequired": true
 }
 ```
 
 `sourceKind`: `synthetic-design-reference`, `photo`, `render`, `floorplan`. Scale basis: `authored-estimate` or `measured`; units `m`. Components are unique nonempty IDs; unknowns is an explicit array. Authorization is a declaration, not a tool-verifiable license. The pinned intake snapshot is `.img2/artifacts/interior/intake.json`.
+
+`excludeComponents` is optional (default `[]`), contains unique exact IDs from `components`, and is pinned with the intake. The parent must map separate object ownership onto these IDs. Draft removes their real scene objects before rendering/baking; a manifest-only omission is not sufficient. A spec-level `excludeComponents`, when supplied, must match the admitted snapshot.
 
 ## Material policy
 
@@ -60,6 +63,82 @@ Output: `.img2/artifacts/interior/material-audit.json`. Gate mode: `--workspace 
 Use observed SHA256s, not invented example digests. The tool cannot establish their provenance or consumer/visual acceptance. Runtime and portable must not be the same file/bytes under two names.
 
 Output: `.img2/artifacts/interior/delivery-audit.json`. Gate mode: `--workspace PATH --gate`; changing the contract or an asset invalidates the saved audit.
+
+## Routed mechanical and structural audit
+
+After the normal material/delivery audits have pinned current inputs in the exact child:
+
+```sh
+python3 tools/audit_routed_artifact.py --workspace "$CHILD" --artifact artifact.json --spec scene-spec.json --blender-python "$IMG2_BLENDER_PYTHON"
+```
+
+`--blender-python` may instead come from `IMG2_BLENDER_PYTHON`; absence fails rather
+than skipping measurements. Requires a compatible bpy interpreter (Blender API
+>=4.3) and linked img2 core for the real subprocess audits. A `blender` executable
+is not required; host-approved `IMG2_BLENDER_PYTHON` selects the native producer.
+Artifact paths/files, intake, reference, builder,
+policies, delivery root/contracts/assets must remain inside this child with no
+symlink aliases. Existing general-purpose delivery audits still support external
+asset roots; this routed audit deliberately does not.
+
+Without `--quality-output`, exit 0 means only mechanical replay passed.
+For native structural measurement and actual four-view captures, use a fresh directory:
+
+```sh
+python3 tools/audit_routed_artifact.py --workspace "$CHILD" --blender-python "$IMG2_BLENDER_PYTHON" --quality-output .img2/artifacts/interior/quality/r1 --gate
+```
+
+`--gate` requires `--quality-output` and emits exactly one `img2.gate-verdict` for
+`interior-routed-structure`. Exit 0 means only this scoped gate passed; exit 1
+means a failed check or unavailable/stale evidence. Without `--gate`, output
+stays `img2.interior-routed-audit`. The evidence carries actual geometry/capture
+measurements and current artifact/spec/reference/camera bindings. Reusing the
+output directory fails; choose a new revision, retaining failures.
+`terminalAcceptance:false` remains explicit. No candidate flags or matching
+digests authenticate a producer or replace independent native-reference semantic
+review or composed-browser acceptance. A trusted host must select/pin the Python
+interpreter, plugin code, dependencies and linked `IMG2_HOME` core; the Blender
+subprocess runs with `-I` and does not execute the workspace builder.
+See [scene contract](scene-contract.md#independent-mechanical-replay-and-scoped-structural-gate).
+
+
+## Local decision snapshots (no provider calls)
+
+`python3 tools/interior_adapter.py --workspace W --spec scene-spec.json --request decision-request.json`
+prints a frozen quality-review context, not an advisory or acceptance. The request has exactly
+`group`, `subject:{runId,objectId,revision,passId}`, `candidates`, `evidence`, `requirements`,
+`policyVersion`, `requestedModel`. The programmatic `authoring.decisions.decision_context`
+also supports `build-strategy` and `repair` when the trusted host supplies separately verified
+`available_dependencies` and `authorized_sources` sets. The CLI cannot grant these facts and
+refuses construction snapshots. The subject pass is the unlocked native pass (`camera`,
+`geometry`, `materials`, `lighting`, `interaction`); the base independently enforces cursor/lock.
+
+Evidence maps roles to local relative files. Required: `source`, `spec`, `builder`, `intake`;
+review/repair also require `gate-report`, `camera`, `render`. Add each required view/crop
+under its own role. Actual bytes are hashed, never fabricated or accepted by this adapter.
+`requirements` carries the base's `criticalFeatures` and `requiredViews`; missing visual
+evidence stays unevaluated by the base's admission policy.
+
+Strategy/repair expose one to three candidates with exactly `id`, `passId`, `components`,
+`operations`, `fieldPaths`, `materialSources`, `dependencies`, `rigHandoff`. The shared plan
+identifier syntax and pass-specific operation/field allowlists are enforced. Components must
+be admitted and not separately owned. Each material source is a real bound SHA-256 also in
+the trusted host's independent authorization set; a provenance claim or filename is not
+authorization. Resource operations require nonempty sources. Native plans retain the `blender`
+capability identifier, verified by the host using the routed `interior-bpy>=4.3`
+probe and that same trusted `IMG2_BLENDER_PYTHON`; the identifier does not require
+a `blender` executable. Missing availability is not inferred. `rigHandoff`
+must be explicitly false: this static interior adapter has no verified skeleton handoff.
+Quality-review candidates remain empty. Arbitrary code/argv, old private plan fields,
+threshold edits, unknown dependencies and excluded-component mutations are rejected.
+
+Application blocker: native scene-spec 1 uses top-level `authoring`/`runtime`, not the base
+`StrategyDecision`'s componentTree-only delta format. No fictitious componentTree is added:
+a base-native-spec application adapter is required before these snapshots can authorize an
+interior trial. The existing safe agent authoring workflow remains unchanged. The shared
+base retains repair diagnosis, pre-spec consultation, immutable applications/trials,
+Jev/login/consent/shared budget, and canonical review authority.
+
 
 ## Review and exit codes
 

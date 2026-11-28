@@ -16,6 +16,8 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+
+from authoring.routing import apply_exclusions, produce_artifact
 BAKE_MARGIN = 2
 
 
@@ -32,6 +34,16 @@ def select_objects(objects):
 
 def meshes():
     return [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and not obj.hide_render]
+
+
+def open_master():
+    bpy.ops.wm.open_mainfile(filepath=str(MASTER))
+    current = CONTEXT.ownership_binding
+    stored = json.loads(bpy.context.scene.get('routing_ownership_json', '{}'))
+    if stored != current and (stored or current['excludeComponents'] or CONTRACT.get('routing')):
+        raise ValueError('Ownership/intake changed since draft; author a new revision and rebake')
+    if any(obj.get('component') in current['excludeComponents'] for obj in bpy.context.scene.objects):
+        raise ValueError('Packed master contains separately owned components; rerun draft')
 
 
 def set_render(width, samples, format='PNG'):
@@ -99,6 +111,20 @@ def stage_draft(args):
     builder = private_module(CONTEXT.resolve(CONTRACT['authoring']['sceneBuilder']))
     result = builder.build_scene(CONTEXT)
     json.dumps(result)
+    ownership = CONTEXT.ownership_binding
+    removed = apply_exclusions(bpy.context.scene.objects, ownership['excludeComponents'],
+                               lambda obj: bpy.data.objects.remove(obj, do_unlink=True))
+    bpy.context.view_layer.update()
+    scene = bpy.context.scene
+    scene['routing_ownership_json'] = json.dumps(ownership, sort_keys=True)
+    scene['routing_exclusions_json'] = json.dumps(removed)
+    if isinstance(result, dict) and ownership['excludeComponents']:
+        result['components'] = {
+            component: [obj.name for obj in scene.objects if obj.type == 'MESH' and obj.get('component') == component]
+            for component in sorted({obj.get('component') for obj in scene.objects
+                                     if obj.type == 'MESH' and obj.get('component')})}
+        result['excludeComponents'] = ownership['excludeComponents']
+        result['removedComponents'] = removed
     scene = set_render(args.width, args.samples)
     if not scene.camera:
         raise RuntimeError('Scene builder did not provide a reference camera')
@@ -126,7 +152,7 @@ def stage_draft(args):
 
 def stage_refresh_material(args):
     """Reload named file maps from disk, removing stale packed bytes first."""
-    bpy.ops.wm.open_mainfile(filepath=str(MASTER))
+    open_master()
     paths = {CONTEXT.resolve(path) for path in args.image}
     if not paths:
         raise ValueError('refresh-material requires one or more --image W-relative paths')
@@ -373,7 +399,7 @@ def denoise_irradiance(objects, materials, irradiance, group, size):
 
 
 def stage_bake(args):
-    bpy.ops.wm.open_mainfile(filepath=str(MASTER))
+    open_master()
     scene = set_render(args.width, args.samples)
     scene.cycles.use_denoising = False  # Cycles texture baking does not use the render denoiser.
     groups = defaultdict(list)
@@ -503,7 +529,7 @@ def require_current_probe(scene):
 
 
 def stage_probe(args):
-    bpy.ops.wm.open_mainfile(filepath=str(MASTER))
+    open_master()
     scene = set_render(args.width, args.samples, 'OPEN_EXR')
     if not scene.get('authoring_revision'):
         raise RuntimeError('Master lacks authoring revision; rerun draft before probe')
@@ -585,7 +611,7 @@ def export_gltf(path, *, tangents=False):
 
 
 def stage_export(args):
-    bpy.ops.wm.open_mainfile(filepath=str(MASTER))
+    open_master()
     scene = bpy.context.scene
     require_current_probe(scene)
     camera = scene.camera
@@ -732,11 +758,14 @@ def stage_export(args):
               'portableSha256': hashlib.sha256(portable_path.read_bytes()).hexdigest(),
               'masterBytes': MASTER.stat().st_size}
     (EVIDENCE / 'exports.json').write_text(json.dumps(output, ensure_ascii=False, indent=2) + '\n')
+    if CONTRACT.get('routing') is not None:
+        artifact = produce_artifact(CONTEXT, runtime)
+        log('routed-artifact-produced', objectId=artifact['objectId'], roomDimensions=artifact['roomDimensions'])
     log('export-complete', runtimeBytes=output['runtimeBytes'], portableBytes=output['portableBytes'])
 
 
 def stage_render(args):
-    bpy.ops.wm.open_mainfile(filepath=str(MASTER))
+    open_master()
     scene = set_render(args.width, args.samples)
     if args.view != 'source':
         pose = CONTRACT['authoring']['inspectionViews'][args.view]

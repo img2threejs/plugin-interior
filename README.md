@@ -10,6 +10,8 @@ Not a pretrained image-to-mesh model or a one-click fidelity guarantee. The work
 
 > **Package:** `@img2threejs/img2interior@0.3.1`; **public npm distribution**. **Source:** [img2threejs/img2interior](https://github.com/img2threejs/img2interior), the same project published to npm. Install with `npm install` + official img2 harness `add --link`, or from the public source — see [installation](reference/installation.md).
 
+The working source targets **0.3.2 (unreleased)** for the routed adapter. The npm installation commands below still identify the published **0.3.1** package; they do not install this unreleased source.
+
 [![npm](https://img.shields.io/npm/v/@img2threejs/img2interior.svg)](https://www.npmjs.com/package/@img2threejs/img2interior) [![npm downloads/month](https://img.shields.io/npm/dm/@img2threejs/img2interior.svg?label=downloads)](https://www.npmjs.com/package/@img2threejs/img2interior)
 
 ## Showcase
